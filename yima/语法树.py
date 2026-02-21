@@ -35,6 +35,13 @@ class 属性访问节点(AST节点):
         self.属性名 = 属性名
         self.行号 = 行号
 
+class 属性设置节点(AST节点):
+    def __init__(self, 对象节点, 属性名, 值节点, 行号):
+        self.对象节点 = 对象节点
+        self.属性名 = 属性名
+        self.值节点 = 值节点
+        self.行号 = 行号
+
 class 列表字面量节点(AST节点):
     def __init__(self, 元素列表, 行号):
         self.元素列表 = 元素列表
@@ -44,6 +51,13 @@ class 索引访问节点(AST节点):
     def __init__(self, 对象节点, 索引节点, 行号):
         self.对象节点 = 对象节点
         self.索引节点 = 索引节点
+        self.行号 = 行号
+
+class 索引设置节点(AST节点):
+    def __init__(self, 对象节点, 索引节点, 值节点, 行号):
+        self.对象节点 = 对象节点
+        self.索引节点 = 索引节点
+        self.值节点 = 值节点
         self.行号 = 行号
 
 class 二元运算节点(AST节点):
@@ -60,6 +74,12 @@ class 引入语句节点(AST节点):
     def __init__(self, 模块名, 别名, 行号):
         self.模块名 = 模块名
         self.别名 = 别名
+        self.行号 = 行号
+
+class 精确引入语句节点(AST节点):
+    def __init__(self, 模块名, 功能名, 行号):
+        self.模块名 = 模块名
+        self.功能名 = 功能名
         self.行号 = 行号
 
 class 显示语句节点(AST节点):
@@ -82,9 +102,10 @@ class 当循环节点(AST节点):
         self.循环体 = 循环体
 
 class 重复循环节点(AST节点):
-    def __init__(self, 次数表达式, 循环体):
+    def __init__(self, 次数表达式, 循环体, 循环变量名=None):
         self.次数表达式 = 次数表达式
         self.循环体 = 循环体
+        self.循环变量名 = 循环变量名
 
 class 跳出语句节点(AST节点):
     pass
@@ -142,4 +163,31 @@ class 尝试语句节点(AST节点):
         self.尝试代码块 = 尝试代码块
         self.错误捕获名 = 错误捕获名
         self.出错代码块 = 出错代码块
+        self.行号 = 行号
+
+# -----------------
+# 面向对象节点
+# -----------------
+class 图纸定义节点(AST节点):
+    def __init__(self, 图纸名, 参数列表, 代码块, 行号):
+        self.图纸名 = 图纸名
+        self.参数列表 = 参数列表
+        self.代码块 = 代码块
+        self.行号 = 行号
+
+class 实例化节点(AST节点):
+    def __init__(self, 图纸名, 参数列表, 行号):
+        self.图纸名 = 图纸名
+        self.参数列表 = 参数列表
+        self.行号 = 行号
+
+class 自身属性访问节点(AST节点):
+    def __init__(self, 属性名, 行号):
+        self.属性名 = 属性名
+        self.行号 = 行号
+
+class 自身属性设置节点(AST节点):
+    def __init__(self, 属性名, 值节点, 行号):
+        self.属性名 = 属性名
+        self.值节点 = 值节点
         self.行号 = 行号

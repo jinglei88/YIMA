@@ -54,12 +54,12 @@ class 语法分析器:
     def _解析语句(self):
         当前 = self._当前Token()
         
-        if 当前.类型 == Token类型.关键字_显示 or 当前.类型 == Token类型.关键字_说:
+        if 当前.类型 == Token类型.关键字_显示:
             return self._解析显示语句()
-        elif 当前.类型 == Token类型.关键字_把 or 当前.类型 == Token类型.关键字_让:
-            return self._解析设定语句()
         elif 当前.类型 == Token类型.关键字_引入:
             return self._解析引入语句()
+        elif 当前.类型 == Token类型.关键字_用:
+            return self._解析用语句()
         elif 当前.类型 == Token类型.关键字_如果:
             return self._解析如果语句()
         elif 当前.类型 == Token类型.关键字_尝试:
@@ -80,13 +80,34 @@ class 语法分析器:
             return self._解析定义函数()
         elif 当前.类型 == Token类型.关键字_交出:
             return self._解析交出语句()
+        elif 当前.类型 == Token类型.关键字_制造图纸:
+            return self._解析制造图纸()
+        elif 当前.类型 == Token类型.关键字_它的:
+            return self._解析它的语句()
         elif 当前.类型 == Token类型.标识符:
             后置 = self._查看(1)
-            # 是否为直接赋值 A = B 或 A 是 B 或 A 变成 B 或 A 是一份清单()
-            if 后置.类型 in [Token类型.关键字_设定为, Token类型.比较_等于, Token类型.关键字_变成, Token类型.关键字_是一份清单, Token类型.关键字_是一堆]:
+            # 是否为直接赋值 A = B
+            if 后置.类型 == Token类型.赋值符号:
                 return self._解析直接赋值语句()
-            # 如果不是直接赋值，那就回退按照表达式来解析
+            # 是否为复合赋值 A += B
+            if 后置.类型 in [Token类型.复合加等, Token类型.复合减等, Token类型.复合乘等, Token类型.复合除等]:
+                return self._解析复合赋值语句()
+            # 否则先解析为表达式，再检查是否有点赋值 (A.B = expr) 或索引赋值 (A[i] = expr)
             表达式 = self._解析表达式()
+            # 检查是否是属性赋值
+            if isinstance(表达式, 属性访问节点) and self._当前Token().类型 == Token类型.赋值符号:
+                self._前进()  # 越过 =
+                值 = self._解析表达式()
+                if self._当前Token().类型 == Token类型.换行:
+                    self._前进()
+                return 属性设置节点(表达式.对象节点, 表达式.属性名, 值, 表达式.行号)
+            # 检查是否是索引赋值
+            if isinstance(表达式, 索引访问节点) and self._当前Token().类型 == Token类型.赋值符号:
+                self._前进()  # 越过 =
+                值 = self._解析表达式()
+                if self._当前Token().类型 == Token类型.换行:
+                    self._前进()
+                return 索引设置节点(表达式.对象节点, 表达式.索引节点, 值, 表达式.行号)
             if self._当前Token().类型 == Token类型.换行:
                 self._前进()
             return 表达式
@@ -110,30 +131,97 @@ class 语法分析器:
             self._前进()
         return 引入语句节点(模块名, 别名, 引入Token.行号)
 
+    def _解析用语句(self):
+        用Token = self._吃掉(Token类型.关键字_用)
+        模块Token = self._吃掉(Token类型.文本, "【用】后面得跟个引号包起来的模块名称哦。比如：用 \"数学库.ym\" 中的 算平方")
+        模块名 = 模块Token.值
+        self._吃掉(Token类型.关键字_中的, "记得用【中的】来指明你要拿什么功能哦！")
+        功能Token = self._吃掉(Token类型.标识符, "【中的】后面得跟个你想要引用的本事名哦。")
+        功能名 = 功能Token.值
+        
+        if self._当前Token().类型 == Token类型.换行:
+            self._前进()
+        return 精确引入语句节点(模块名, 功能名, 用Token.行号)
+
     def _解析交出语句(self):
         self._吃掉(Token类型.关键字_交出)
         # 支持空返回
         当前 = self._当前Token()
-        if 当前.类型 in (Token类型.换行, Token类型.文件结束, Token类型.关键字_结束, Token类型.关键字_学完了):
+        if 当前.类型 in (Token类型.换行, Token类型.文件结束, Token类型.关键字_完事):
             表达式 = None
         else:
             表达式 = self._解析表达式()
         return 交出语句节点(表达式)
 
+    def _解析制造图纸(self):
+        自我Token = self._吃掉(Token类型.关键字_制造图纸)
+        图纸名Token = self._吃掉(Token类型.标识符, "【制造图纸】后面得跟一个名字哦。")
+        图纸名 = 图纸名Token.值
+        
+        # 解析参数列表 (构造参数)
+        参数列表 = []
+        if self._当前Token().类型 == Token类型.左括号:
+            self._前进()
+            while self._当前Token().类型 != Token类型.右括号:
+                词 = self._吃掉(Token类型.标识符, "参数得是一个名字（标识符）。")
+                参数列表.append(词.值)
+                if self._当前Token().类型 == Token类型.逗号:
+                    self._前进()
+            self._吃掉(Token类型.右括号)
+        elif self._当前Token().类型 == Token类型.关键字_需要:
+            self._前进()
+            while self._当前Token().类型 not in (Token类型.换行, Token类型.文件结束):
+                词 = self._当前Token()
+                if 词.类型 == Token类型.标识符:
+                    参数列表.append(词.值)
+                    self._前进()
+                if self._当前Token().类型 == Token类型.逗号:
+                    self._前进()
+                else:
+                    break
+                    
+        self._跳过多余换行()
+        代码块 = self._解析代码块(截止标识=[Token类型.关键字_完事])
+        
+        结束符 = self._当前Token()
+        if 结束符.类型 == Token类型.关键字_完事:
+            self._前进()
+            if self._当前Token().类型 == Token类型.换行:
+                self._前进()
+        else:
+            raise 语法报错("制造图纸定义完了，记得加上【完事】哦。", 结束符.行号, 结束符.列号)
+            
+        return 图纸定义节点(图纸名, 参数列表, 代码块, 自我Token.行号)
+
+    def _解析它的语句(self):
+        它的Token = self._吃掉(Token类型.关键字_它的)
+        # 期待 它的 后面跟标识符
+        属性Token = self._吃掉(Token类型.标识符, "【它的】后面得跟一个属性名哦。")
+        属性名 = 属性Token.值
+        
+        # 检查是否是赋值
+        if self._当前Token().类型 == Token类型.赋值符号:
+            self._前进()  # 越过 =
+            值 = self._解析表达式()
+            if self._当前Token().类型 == Token类型.换行:
+                self._前进()
+            return 自身属性设置节点(属性名, 值, 它的Token.行号)
+        else:
+            # 解析为表达式上下文 (读取属性)
+            节点 = 自身属性访问节点(属性名, 它的Token.行号)
+            if self._当前Token().类型 == Token类型.换行:
+                self._前进()
+            return 节点
+
     def _解析定义函数(self):
         自我Token = self._当前Token()
-        # 兼容 功能、教你、定义
-        if 自我Token.类型 == Token类型.关键字_功能:
-            self._吃掉(Token类型.关键字_功能)
-        else:
-            self._前进() # 越过未吃掉的等义词
+        self._吃掉(Token类型.关键字_功能)
             
-        函数名Token = self._吃掉(Token类型.标识符, "定义指令后面得跟一个名字哦。比如：教你 打招呼")
+        函数名Token = self._吃掉(Token类型.标识符, "定义指令后面得跟一个名字哦。比如：功能 打招呼")
         函数名 = 函数名Token.值
         
         参数列表 = []
         当前 = self._当前Token()
-        # 支持 教你 打招呼 收取 名字, 年龄
         if 当前.类型 == Token类型.左括号:
             self._前进()
             while self._当前Token().类型 != Token类型.右括号:
@@ -143,39 +231,29 @@ class 语法分析器:
                     self._前进()
                 else: break
             self._吃掉(Token类型.右括号, "参数写完记得把右括号补上。")
-        elif 当前.类型 in (Token类型.关键字_需要, Token类型.标识符): # 如果看到的是个标识符，可能是 "收取" 或 "需要"
-            if 当前.类型 == Token类型.关键字_需要:
-                self._前进()
-            elif 当前.值 in ("收取", "接受", "需要"):
-                self._前进() # 越过口语修饰词
-                
-            while self._当前Token().类型 not in (Token类型.换行, Token类型.文件结束, Token类型.关键字_结束, Token类型.关键字_学完了, Token类型.关键字_搞定, Token类型.关键字_完事):
+        elif 当前.类型 == Token类型.关键字_需要:
+            self._前进()
+            while self._当前Token().类型 not in (Token类型.换行, Token类型.文件结束, Token类型.关键字_完事):
                 词 = self._当前Token()
                 if 词.类型 == Token类型.标识符:
                     参数列表.append(词.值)
                     self._前进()
                 if self._当前Token().类型 == Token类型.逗号:
                     self._前进()
-                elif self._当前Token().类型 == Token类型.标识符:
-                    # 如果又是一个标识符，并且没逗号，那么如果是 "和" 也可以当逗号
-                    if self._当前Token().值 == "和":
-                        self._前进()
-                    else:
-                        pass # 处理连续的标识符可能出错，这里原逻辑是 pass
                 else:
                     break
                     
         self._跳过多余换行()
-        代码块 = self._解析代码块(截止标识=[Token类型.关键字_学完了, Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事])
+        代码块 = self._解析代码块(截止标识=[Token类型.关键字_完事])
         
         结束符 = self._当前Token()
-        if 结束符.类型 in (Token类型.关键字_学完了, Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事):
+        if 结束符.类型 == Token类型.关键字_完事:
             self._前进()
             if self._当前Token().类型 == Token类型.换行:
                 self._前进()
             return 定义函数节点(函数名, 参数列表, 代码块, 函数名Token.行号)
         else:
-            raise 语法报错("定义完动作以后，记得要说一句【结束】哦。", 结束符.行号, 结束符.列号)
+            raise 语法报错("定义完功能以后，记得要说一句【完事】哦。", 结束符.行号, 结束符.列号)
 
     def _解析如果语句(self):
         条件分支列表 = []
@@ -183,18 +261,14 @@ class 语法分析器:
         
         self._吃掉(Token类型.关键字_如果)
         条件 = self._解析表达式()
-        # “的话”或者“就”变成可选的，更口语化
         当前 = self._当前Token()
-        if 当前.类型 in (Token类型.关键字_的话, Token类型.关键字_就):
+        if 当前.类型 == Token类型.关键字_就:
             self._前进()
         self._跳过多余换行()
         
         真分支 = self._解析代码块(截止标识=[
             Token类型.关键字_否则如果,
-            Token类型.关键字_不然的话,
             Token类型.关键字_不然,
-            Token类型.关键字_结束,
-            Token类型.关键字_搞定,
             Token类型.关键字_完事
         ])
         条件分支列表.append((条件, 真分支))
@@ -203,29 +277,26 @@ class 语法分析器:
             self._前进()
             新条件 = self._解析表达式()
             当前 = self._当前Token()
-            if 当前.类型 in (Token类型.关键字_的话, Token类型.关键字_就):
+            if 当前.类型 == Token类型.关键字_就:
                 self._前进()
             self._跳过多余换行()
             新真分支 = self._解析代码块(截止标识=[
                 Token类型.关键字_否则如果,
-                Token类型.关键字_不然的话,
                 Token类型.关键字_不然,
-                Token类型.关键字_结束,
-                Token类型.关键字_搞定,
                 Token类型.关键字_完事
             ])
             条件分支列表.append((新条件, 新真分支))
             
-        if self._当前Token().类型 in (Token类型.关键字_不然的话, Token类型.关键字_不然):
+        if self._当前Token().类型 == Token类型.关键字_不然:
             self._前进()
             self._跳过多余换行()
-            否则分支列表 = self._解析代码块(截止标识=[Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事])
+            否则分支列表 = self._解析代码块(截止标识=[Token类型.关键字_完事])
             
         结束符 = self._当前Token()
-        if 结束符.类型 in (Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事):
+        if 结束符.类型 == Token类型.关键字_完事:
             self._前进()
         else:
-            raise 语法报错("逻辑分支写完了，记得要在末尾加上【搞定】或【完事】哦。", 结束符.行号, 结束符.列号)
+            raise 语法报错("逻辑分支写完了，记得要在末尾加上【完事】哦。", 结束符.行号, 结束符.列号)
         
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
@@ -238,8 +309,6 @@ class 语法分析器:
         
         尝试代码块 = self._解析代码块(截止标识=[
             Token类型.关键字_如果出错,
-            Token类型.关键字_结束,
-            Token类型.关键字_搞定,
             Token类型.关键字_完事
         ])
         
@@ -250,21 +319,25 @@ class 语法分析器:
         if 如果出错Token.类型 == Token类型.关键字_如果出错:
             self._前进() # 越过 如果出错
             
-            # 有没有叫做 xxx 
+            # 有没有叫做 xxx 或者直接跟变量名
             如果叫做Token = self._当前Token()
             if 如果叫做Token.类型 == Token类型.关键字_叫做:
                 self._前进()
                 名字Token = self._吃掉(Token类型.标识符, "【如果出错 叫做】的后面得跟个变量名字哦。")
                 错误名 = 名字Token.值
+            elif 如果叫做Token.类型 == Token类型.标识符:
+                # 允许直接写 如果出错 变量名（不需要叫做）
+                错误名 = 如果叫做Token.值
+                self._前进()
                 
             self._跳过多余换行()
-            出错代码块 = self._解析代码块(截止标识=[Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事])
+            出错代码块 = self._解析代码块(截止标识=[Token类型.关键字_完事])
             
         结束符 = self._当前Token()
-        if 结束符.类型 in (Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事):
+        if 结束符.类型 == Token类型.关键字_完事:
             self._前进()
         else:
-            raise 语法报错("尝试逻辑写完了，记得要在末尾加上【搞定】或【完事】哦。", 结束符.行号, 结束符.列号)
+            raise 语法报错("尝试逻辑写完了，记得要在末尾加上【完事】哦。", 结束符.行号, 结束符.列号)
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
             
@@ -276,13 +349,13 @@ class 语法分析器:
         self._吃掉(Token类型.关键字_的时候, "【当】的条件写完后，别忘了加【的时候】哦。")
         self._跳过多余换行()
         
-        循环体 = self._解析代码块(截止标识=[Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事])
+        循环体 = self._解析代码块(截止标识=[Token类型.关键字_完事])
         
         结束符 = self._当前Token()
-        if 结束符.类型 in (Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事):
+        if 结束符.类型 == Token类型.关键字_完事:
             self._前进()
         else:
-            raise 语法报错("循环逻辑写完了，记得要在末尾加上【搞定】或【完事】哦。", 结束符.行号, 结束符.列号)
+            raise 语法报错("循环逻辑写完了，记得要在末尾加上【完事】哦。", 结束符.行号, 结束符.列号)
         
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
@@ -293,20 +366,28 @@ class 语法分析器:
         self._吃掉(Token类型.关键字_重复)
         次数表达式 = self._解析表达式()
         self._吃掉(Token类型.关键字_次, "要告诉我重复多少【次】哦。")
+        
+        # 可选：叫做 变量名（给循环计数器取名）
+        循环变量名 = None
+        if self._当前Token().类型 == Token类型.关键字_叫做:
+            self._前进()
+            变量Token = self._吃掉(Token类型.标识符, "【叫做】后面要跟一个变量名哦。")
+            循环变量名 = 变量Token.值
+        
         self._跳过多余换行()
         
-        循环体 = self._解析代码块(截止标识=[Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事])
+        循环体 = self._解析代码块(截止标识=[Token类型.关键字_完事])
         
         结束符 = self._当前Token()
-        if 结束符.类型 in (Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事):
+        if 结束符.类型 == Token类型.关键字_完事:
             self._前进()
         else:
-            raise 语法报错("循环逻辑写完了，记得要在末尾加上【搞定】或【完事】哦。", 结束符.行号, 结束符.列号)
+            raise 语法报错("循环逻辑写完了，记得要在末尾加上【完事】哦。", 结束符.行号, 结束符.列号)
         
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
             
-        return 重复循环节点(次数表达式, 循环体)
+        return 重复循环节点(次数表达式, 循环体, 循环变量名)
 
     def _解析遍历循环(self):
         # 取出 列表 里的每一个 叫做 元素
@@ -317,13 +398,13 @@ class 语法分析器:
         元素名Token = self._吃掉(Token类型.标识符, "【叫做】后面得跟个变量名字哦。")
         self._跳过多余换行()
         
-        循环体 = self._解析代码块(截止标识=[Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事])
+        循环体 = self._解析代码块(截止标识=[Token类型.关键字_完事])
         
         结束符 = self._当前Token()
-        if 结束符.类型 in (Token类型.关键字_结束, Token类型.关键字_搞定, Token类型.关键字_完事):
+        if 结束符.类型 == Token类型.关键字_完事:
             self._前进()
         else:
-            raise 语法报错("循环逻辑写完了，记得要在末尾加上【搞定】或【完事】哦。", 结束符.行号, 结束符.列号)
+            raise 语法报错("循环逻辑写完了，记得要在末尾加上【完事】哦。", 结束符.行号, 结束符.列号)
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
             
@@ -340,11 +421,7 @@ class 语法分析器:
         return 语句列表
 
     def _解析显示语句(self):
-        当前Token = self._当前Token()
-        if 当前Token.类型 == Token类型.关键字_说:
-            self._吃掉(Token类型.关键字_说)
-        else:
-            self._吃掉(Token类型.关键字_显示)
+        self._吃掉(Token类型.关键字_显示)
             
         表达式 = self._解析表达式()
         if self._当前Token().类型 == Token类型.换行:
@@ -356,13 +433,9 @@ class 语法分析器:
         名字 = 名字Token.值
         
         连接符 = self._当前Token()
-        self._前进() # 越过 =, 是, 变成, 是一份清单, 是一堆
+        self._前进() # 越过 =
         
-        if 连接符.类型 in (Token类型.关键字_是一份清单, Token类型.关键字_是一堆):
-            参数列表 = self._可选的函数参数解析()
-            表达式 = 函数调用节点("新列表", 参数列表, 连接符.行号)
-        else:
-            表达式 = self._解析表达式()
+        表达式 = self._解析表达式()
             
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
@@ -380,55 +453,40 @@ class 语法分析器:
             self._吃掉(Token类型.右括号)
         return 参数列表
 
-    def _解析设定语句(self):
-        当前Token = self._当前Token()
+    def _解析复合赋值语句(self):
+        名字Token = self._吃掉(Token类型.标识符)
+        名字 = 名字Token.值
+        操作Token = self._当前Token()
+        self._前进()  # 越过 +=, -=, *=, /=
         
-        # 支持三种语法：
-        # 1. 极致小白话: 让 变量 = 表达式    
-        if 当前Token.类型 == Token类型.关键字_让:
-            self._吃掉(Token类型.关键字_让)
-            标签Token = self._当前Token()
-            if 标签Token.类型 != Token类型.标识符:
-                raise 语法报错("【让】的后面应该跟一个变量名哦。如：让 数字 = 1", 标签Token.行号, 标签Token.列号)
-            名字 = 标签Token.值
-            self._前进()
-            
-            # 支持 “设为”、“=”、“是”、“变成”、“是一份清单”
-            如果等于 = self._当前Token()
-            if 如果等于.类型 not in (Token类型.比较_等于, Token类型.关键字_设定为, Token类型.关键字_变成, Token类型.关键字_是一份清单, Token类型.关键字_是一堆):
-                raise 语法报错("【让 某物】后面得跟一个等号或者【是】【变成】哦。", 如果等于.行号, 如果等于.列号)
-            self._前进()
-            
-            if 如果等于.类型 in (Token类型.关键字_是一份清单, Token类型.关键字_是一堆):
-                参数列表 = self._可选的函数参数解析()
-                表达式 = 函数调用节点("新列表", 参数列表, 如果等于.行号)
-            else:
-                表达式 = self._解析表达式()
-            
-        # 2. 把 变量 设定为 表达式 (旧语法)
-        else:
-            self._吃掉(Token类型.关键字_把)
-            标签Token = self._当前Token()
-            if 标签Token.类型 != Token类型.标识符:
-                raise 语法报错("【把】的后面应该跟一个名字（比如变量名），而不是别的哦。", 标签Token.行号, 标签Token.列号)
-            名字 = 标签Token.值
-            self._前进()
-            self._吃掉(Token类型.关键字_设定为, "少了【设定为】哦！比如：把 名字 设定为 1")
-            表达式 = self._解析表达式()
-            
+        # 将 X += expr 脱糖为 X = X + expr
+        运算符映射 = {
+            Token类型.复合加等: (Token类型.算符_加上, "+"),
+            Token类型.复合减等: (Token类型.算符_减去, "-"),
+            Token类型.复合乘等: (Token类型.算符_乘以, "*"),
+            Token类型.复合除等: (Token类型.算符_除以, "/"),
+        }
+        右边表达式 = self._解析表达式()
+        from .词法分析 import Token
+        目标类型, 目标值 = 运算符映射[操作Token.类型]
+        伪运算符 = Token(目标类型, 目标值, 操作Token.行号, 操作Token.列号)
+        合成表达式 = 二元运算节点(变量访问节点(名字, 名字Token.行号), 伪运算符, 右边表达式, 操作Token.行号)
+        
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
-            
-        return 变量设定节点(名字, 表达式)
+        return 变量设定节点(名字, 合成表达式)
+
+
 
     # --- 中文算符优先级定义 ---
     优先级字典 = {
+        Token类型.算符_幂: 50,
         Token类型.算符_乘以: 40,
         Token类型.算符_除以: 40,
+        Token类型.算符_整除: 40,
         Token类型.算符_取余: 40,
         Token类型.算符_加上: 30,
         Token类型.算符_减去: 30,
-        Token类型.算符_拼接: 30,
         Token类型.比较_大于: 20,
         Token类型.比较_小于: 20,
         Token类型.比较_等于: 20,
@@ -466,11 +524,12 @@ class 语法分析器:
         当前 = self._当前Token()
         primary = None
         
-        if 当前.类型 in (Token类型.逻辑_取反, Token类型.逻辑_反过来说):
+        if 当前.类型 in (Token类型.逻辑_取反, Token类型.算符_减去):
             操作符Token = 当前
             self._前进()
-            # 优先级设定为 15，介于比较运算和逻辑运算之间
-            操作数 = self._解析表达式(15)
+            # 优先级设定为 15，介于比较运算和逻辑运算之间 (或者是数学强优先)
+            优先级 = 15 if 操作符Token.类型 != Token类型.算符_减去 else 35
+            操作数 = self._解析表达式(优先级)
             primary = 一元运算节点(操作符Token, 操作数, 操作符Token.行号)
             
         elif 当前.类型 == Token类型.关键字_询问:
@@ -478,11 +537,18 @@ class 语法分析器:
             提示节点 = self._解析表达式(0)
             primary = 询问表达式节点(提示节点)
             
-        elif 当前.类型 in (Token类型.关键字_是一份清单, Token类型.关键字_是一堆):
-            自我Token = 当前
+
+        elif 当前.类型 == Token类型.关键字_制造:
+            制造Token = 当前
             self._前进()
+            图纸名Token = self._吃掉(Token类型.标识符, "【制造】后面得跟一个图纸名哦。")
             参数列表 = self._可选的函数参数解析()
-            primary = 函数调用节点("新列表", 参数列表, 自我Token.行号)
+            primary = 实例化节点(图纸名Token.值, 参数列表, 制造Token.行号)
+            
+        elif 当前.类型 == Token类型.关键字_它的:
+            self._前进()
+            属性Token = self._吃掉(Token类型.标识符, "【它的】后面得跟一个属性名哦。")
+            primary = 自身属性访问节点(属性Token.值, 当前.行号)
             
         elif 当前.类型 in (Token类型.布尔_对, Token类型.布尔_错):
             # 直接用文本字面量节点包裹真假值，因为解释器对于它的处理就是返回值本身
@@ -497,8 +563,8 @@ class 语法分析器:
             primary = 模板字符串节点(当前.值)
             self._前进()
             
-        elif 当前.类型 in (Token类型.空值_无, Token类型.空值_空的):
-            primary = 文本字面量节点(None if 当前.类型 == Token类型.空值_无 else "")
+        elif 当前.类型 == Token类型.空值_空:
+            primary = 文本字面量节点(None)
             self._前进()
             
         elif 当前.类型 == Token类型.数字:

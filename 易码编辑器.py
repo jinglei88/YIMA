@@ -709,59 +709,143 @@ class 易码IDE:
         self._create_editor_tab("未命名代码.ym", "")
 
     def export_exe(self):
-        import threading
-        import tempfile
-        import os
-        # (shutil is now imported globally)
-        
-        # 直接询问用户想要把最终的 exe 保存到哪里
-        filepath = filedialog.asksaveasfilename(
-            title="请选择你生成的 EXE 软件想要存放在哪里",
-            defaultextension=".exe", 
-            filetypes=[("Windows 独立软件", "*.exe")]
-        )
-        if not filepath:
-            return
         editor = self._get_current_editor()
         if not editor: return
-        
         源码内容 = editor.get("1.0", "end-1c")
-            
-        隐藏黑框 = messagebox.askyesno("打包选项", "这是一个带【自定义图形界面】的程序吗？\n\n- 如果是专门画了窗口的程序，选【是】（运行时隐藏黑色控制台）。\n- 如果是只在黑框框打文字的程序，选【否】。")
-        
-        self.print_output(f"=============================\n起锅烧油！准备编译生成独立的 EXE 程序（需要调用原生 C 语言等底层工具链重铸你的程序，这可能需要几十秒到几分钟，请耐心等待直到弹窗成功~）\n=============================")
-        
-        def 打印进度(文字):
-            def 更新UI():
-                self.print_output(文字)
-            self.root.after(0, 更新UI)
+        if not 源码内容.strip():
+            messagebox.showwarning("无法打包", "代码是空的，先写点啥吧！")
+            return
 
-        def 后台打包():
-            try:
-                # 后台偷梁换柱：先保存成临时 ym 给我的编译器用
-                临时目录 = tempfile.gettempdir()
-                临时ym = os.path.join(临时目录, "_易码源码编译缓冲.ym")
-                with open(临时ym, 'w', encoding='utf-8') as f:
-                    f.write(源码内容)
+        # 创建一个自定义的打包设置对话框
+        dlg = tk.Toplevel(self.root)
+        dlg.title("📦 导出易码软件")
+        # 居中显示
+        win_w = int(500 * self.dpi_scale)
+        win_h = int(350 * self.dpi_scale)
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win_w // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win_h // 2)
+        dlg.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        dlg.resizable(False, False)
+        dlg.configure(bg="#f5f6f7")
+        dlg.transient(self.root) # 保持在主窗口前
+        dlg.grab_set() # 独占焦点
+
+        # 标题区域
+        tk.Label(dlg, text="生成独立的 Windows 软件 (EXE)", font=("Microsoft YaHei", 14, "bold"), bg="#f5f6f7", fg="#333333").pack(pady=(20, 10))
+
+        form_frame = tk.Frame(dlg, bg="#f5f6f7")
+        form_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
+
+        # 1. 保存位置
+        tk.Label(form_frame, text="存到哪里：", font=self.font_ui, bg="#f5f6f7").grid(row=0, column=0, sticky="e", pady=10)
+        path_var = tk.StringVar()
+        path_entry = ttk.Entry(form_frame, textvariable=path_var, width=30, font=self.font_ui)
+        path_entry.grid(row=0, column=1, sticky="w", pady=10)
+        
+        tab_id = self._get_current_tab_id()
+        当前文件名 = "我的易码软件"
+        if tab_id and self.tabs_data[tab_id]["filepath"] != "未命名代码.ym":
+            当前文件名, _ = os.path.splitext(os.path.basename(self.tabs_data[tab_id]["filepath"]))
+        path_var.set(os.path.join(os.path.expanduser("~"), "Desktop", f"{当前文件名}.exe")) # 默认放桌面
+
+        def browse_save_path():
+            filepath = filedialog.asksaveasfilename(
+                title="选择保存位置", defaultextension=".exe", filetypes=[("Windows 软件", "*.exe")], parent=dlg,
+                initialfile=f"{当前文件名}.exe"
+            )
+            if filepath: path_var.set(filepath)
+            
+        ttk.Button(form_frame, text="浏览...", command=browse_save_path).grid(row=0, column=2, padx=(5, 0), pady=10)
+
+        # 2. 个性图标
+        tk.Label(form_frame, text="个性图标：", font=self.font_ui, bg="#f5f6f7").grid(row=1, column=0, sticky="e", pady=10)
+        icon_var = tk.StringVar()
+        icon_entry = ttk.Entry(form_frame, textvariable=icon_var, width=30, font=self.font_ui)
+        icon_entry.insert(0, "(留空则使用默认易码图标)")
+        icon_entry.config(foreground="gray")
+        icon_entry.grid(row=1, column=1, sticky="w", pady=10)
+        
+        def on_icon_focus_in(e):
+            if icon_entry.get() == "(留空则使用默认易码图标)":
+                icon_entry.delete(0, "end")
+                icon_entry.config(foreground="black")
+                
+        def on_icon_focus_out(e):
+            if not icon_entry.get():
+                icon_entry.insert(0, "(留空则使用默认易码图标)")
+                icon_entry.config(foreground="gray")
+                
+        icon_entry.bind("<FocusIn>", on_icon_focus_in)
+        icon_entry.bind("<FocusOut>", on_icon_focus_out)
+
+        def browse_icon():
+            filepath = filedialog.askopenfilename(
+                title="选择 .ico 图标", filetypes=[("Windows 图标文件", "*.ico")], parent=dlg
+            )
+            if filepath:
+                icon_entry.config(foreground="black")
+                icon_var.set(filepath)
+                
+        ttk.Button(form_frame, text="浏览...", command=browse_icon).grid(row=1, column=2, padx=(5, 0), pady=10)
+
+        # 3. 运行模式 (黑框)
+        tk.Label(form_frame, text="运行模式：", font=self.font_ui, bg="#f5f6f7").grid(row=2, column=0, sticky="e", pady=10)
+        mode_var = tk.IntVar(value=1) # 默认 1 (显示控制台)
+        radio_frame = tk.Frame(form_frame, bg="#f5f6f7")
+        radio_frame.grid(row=2, column=1, columnspan=2, sticky="w")
+        ttk.Radiobutton(radio_frame, text="代码黑框版 (带文字调试口)", variable=mode_var, value=1).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Radiobutton(radio_frame, text="纯净窗口版 (隐藏黑框，适用画板/弹窗)", variable=mode_var, value=2).pack(side=tk.LEFT)
+
+        # 底部按钮
+        btn_frame = tk.Frame(dlg, bg="#f5f6f7")
+        btn_frame.pack(fill=tk.X, pady=(10, 20), padx=30)
+        
+        def start_packing():
+            target_path = path_var.get().strip()
+            if not target_path:
+                messagebox.showerror("抱歉", "得给我一个保存地址呀！", parent=dlg)
+                return
+                
+            icon_path = icon_var.get().strip()
+            if icon_path == "(留空则使用默认易码图标)":
+                icon_path = None
+                
+            隐藏黑框 = (mode_var.get() == 2)
+            
+            dlg.destroy() # 关闭弹窗开始干活
+            
+            import threading
+            import tempfile
+            
+            self.print_output(f"=============================\n起锅烧油！准备编译生成独立的 EXE 程序（需要调用原生 C 语言等底层工具链重铸你的程序，这可能需要几十秒到几分钟，请耐心等待直到弹窗成功~）\n=============================")
+            
+            def 打印进度(文字):
+                self.root.after(0, lambda: self.print_output(文字))
+
+            def 后台打包():
+                try:
+                    临时目录 = tempfile.gettempdir()
+                    临时ym = os.path.join(临时目录, "_易码源码编译缓冲.ym")
+                    with open(临时ym, 'w', encoding='utf-8') as f:
+                        f.write(源码内容)
+                        
+                    from 易码打包工具 import 编译并打包
+                    最终编译出来的路径 = 编译并打包(临时ym, 图标路径=icon_path, 隐藏黑框=隐藏黑框, 进度打字机=打印进度)
                     
-                from 易码打包器 import 编译并打包
-                最终编译出来的路径 = 编译并打包(临时ym, 隐藏黑框=隐藏黑框, 进度打字机=打印进度)
-                
-                # 把编译好的文件悄悄移动到用户刚才指定的路径
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-                shutil.move(最终编译出来的路径, filepath)
-                
-                # 还可以顺便清理一下桌面或其他地方可能残留的缓存
-                self.root.after(0, lambda: messagebox.showinfo("大功告成 🎉", f"你的易码原生软件已经脱胎换骨，生成完毕！\n请去这里双击：\n{filepath}"))
-            except Exception as e:
-                错误信息 = str(e)
-                self.root.after(0, lambda msg=错误信息: messagebox.showerror("打包失败了", msg))
-                
-        # 启动后台线程打包，防止界面卡死
-        t = threading.Thread(target=后台打包)
-        t.daemon = True
-        t.start()
+                    if os.path.exists(target_path):
+                        os.remove(target_path)
+                    shutil.move(最终编译出来的路径, target_path)
+                    
+                    self.root.after(0, lambda: messagebox.showinfo("大功告成 🎉", f"你的易码原生软件已经脱胎换骨，生成完毕！\n请去这里双击：\n{target_path}"))
+                except Exception as e:
+                    self.root.after(0, lambda msg=str(e): messagebox.showerror("打包失败了", msg))
+                    
+            t = threading.Thread(target=后台打包)
+            t.daemon = True
+            t.start()
+
+        ttk.Button(btn_frame, text="取消", command=dlg.destroy).pack(side=tk.RIGHT, padx=(10, 0))
+        tk.Button(btn_frame, text="🚀 立即打包！", font=("Microsoft YaHei", 10, "bold"), bg="#2196F3", fg="white", relief="flat", padx=15, pady=5, command=start_packing).pack(side=tk.RIGHT)
 
 if __name__ == "__main__":
     # 必须在初始化 Tk 之前宣告 DPI 感知，否则即使点数(pt)字体缩放了，Tkinter本身也会按照低分屏映射引发排版错乱
