@@ -104,11 +104,11 @@ class 语法分析器:
         elif 当前.类型 == Token类型.关键字_遍历:
             return self._解析遍历循环()
         elif 当前.类型 == Token类型.关键字_停下:
-            self._吃掉(Token类型.关键字_停下)
-            return 跳出语句节点()
+            停下Token = self._吃掉(Token类型.关键字_停下)
+            return 跳出语句节点(停下Token.行号)
         elif 当前.类型 == Token类型.关键字_略过:
-            self._吃掉(Token类型.关键字_略过)
-            return 继续语句节点()
+            略过Token = self._吃掉(Token类型.关键字_略过)
+            return 继续语句节点(略过Token.行号)
         elif 当前.类型 == Token类型.关键字_功能:
             return self._解析定义函数()
         elif 当前.类型 == Token类型.关键字_返回:
@@ -177,14 +177,14 @@ class 语法分析器:
         return 精确引入语句节点(模块名, 功能名, 用Token.行号)
 
     def _解析返回语句(self):
-        self._吃掉(Token类型.关键字_返回)
+        返回Token = self._吃掉(Token类型.关键字_返回)
         # 支持空返回
         当前 = self._当前Token()
         if 当前.类型 in (Token类型.换行, Token类型.文件结束, Token类型.退缩):
             表达式 = None
         else:
             表达式 = self._解析表达式()
-        return 返回语句节点(表达式)
+        return 返回语句节点(表达式, 返回Token.行号)
 
     def _解析定义图纸(self):
         自我Token = self._吃掉(Token类型.关键字_定义图纸)

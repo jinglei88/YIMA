@@ -190,8 +190,6 @@ class 解释器:
         self.全局环境.记住("转数字", 转数字)
         self.全局环境.记住("转文字", 转文字)
         self.全局环境.记住("新列表", 新列表)
-        self.全局环境.记住("排列", 新列表)  # 排列 是 新列表 的别名
-        self.全局环境.记住("是一份清单", 新列表)  # 兼容旧写法
         self.全局环境.记住("加入", 加入)
         self.全局环境.记住("插入", 插入)
         self.全局环境.记住("长度", 长度)
@@ -802,7 +800,18 @@ class 解释器:
         def 刷新画面(): turtle.update()
         def 清除画面(): turtle.clear()
         def 写字(文字): turtle.write(str(文字), align="center", font=("Microsoft YaHei", 24, "normal"))
-        def 监听按键(): turtle.listen()
+        def 监听按键():
+            屏幕 = turtle.Screen()
+            屏幕.listen()
+            # 尽量把键盘焦点给画板，减少“按键无反应”的误判
+            try:
+                屏幕._root.focus_force()
+            except Exception:
+                pass
+            try:
+                屏幕.getcanvas().focus_force()
+            except Exception:
+                pass
         
         # 兼容“功能对象”与可调用对象，按键回调默认无参数
         def 绑定按键(可调用目标, 按键名):
@@ -811,15 +820,22 @@ class 解释器:
             if not 函数对象 and not hasattr(可调用目标, "__call__"):
                 raise 运行报错("绑定按键的第一个参数必须是功能名称或可调用目标。", 0)
 
-            def 内部回调():
-                if 函数对象:
-                    if len(函数对象.参数列表) != 0:
-                        raise 运行报错(f"按键回调【{函数对象.函数名}】不能带参数。", 0)
-                    self._执行易码函数对象(函数对象, [], 0)
-                    return
-                可调用目标()
+            按键文本 = str(按键名).strip()
+            if not 按键文本:
+                raise 运行报错("绑定按键的第二个参数不能为空。", 0)
 
-            turtle.onkey(内部回调, str(按键名))
+            def 内部回调():
+                try:
+                    if 函数对象:
+                        if len(函数对象.参数列表) != 0:
+                            raise 运行报错(f"按键回调【{函数对象.函数名}】不能带参数。", 0)
+                        self._执行易码函数对象(函数对象, [], 0)
+                        return
+                    可调用目标()
+                except Exception as e:
+                    print(f"⚠️ 按键回调失败（{按键文本}）：{e}")
+
+            turtle.onkey(内部回调, 按键文本)
 
         def 计算距离(x, y):
             return turtle.distance(转数字(x), 转数字(y))
@@ -1254,7 +1270,7 @@ class 解释器:
                             if len(参数值) != len(原始函数.参数列表):
                                 from .错误 import 运行报错
                                 raise 运行报错(f"方法参数数量不匹配：需要 {len(原始函数.参数列表)} 个，实际传入 {len(参数值)} 个。", 原始函数.行号)
-                            函数环境 = 环境(爸爸环境=绑定的实例环境, 禁止向上赋值=self.严格局部作用域)
+                            函数环境 = 环境(爸爸环境=绑定的实例环境, 禁止向上赋值=解释器引用.严格局部作用域)
                             for 名字, 值 in zip(原始函数.参数列表, 参数值):
                                 函数环境.记录本[名字] = 值
                             旧实例环境 = getattr(解释器引用, '_当前实例环境', None)

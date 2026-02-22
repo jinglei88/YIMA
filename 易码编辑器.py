@@ -20,6 +20,7 @@ import re
 import builtins
 import os
 import json
+import importlib.util
 
 # 将当前目录添加到系统路径，确保能找到 yima 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,6 +47,7 @@ class 易码IDE:
         self._highlight_after_id = None
         self._diagnose_after_id = None
         self._outline_after_id = None
+        self._semantic_module_cache = {}
         self.find_dialog = None
         self.find_var = tk.StringVar(value="")
         self.replace_var = tk.StringVar(value="")
@@ -166,7 +168,7 @@ class 易码IDE:
 
     def _builtin_word_catalog(self):
         return [
-            "排列", "新列表", "是一份清单", "加入", "插入", "长度", "删除",
+            "新列表", "加入", "插入", "长度", "删除",
             "转数字", "转文字", "取随机数",
             "所有键", "所有值", "存在",
             "截取", "查找", "替换", "分割", "去空格", "包含",
@@ -185,6 +187,24 @@ class 易码IDE:
             "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画", "刷新画面", "清除", "写字", "开始监听", "绑定按键",
             "计算距离", "当前X", "当前Y",
         ]
+
+    def _builtin_module_exports(self):
+        return {
+            "文件管理": ["读文件", "写文件", "追加文件"],
+            "系统工具": ["文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录", "拼路径", "绝对路径", "当前目录"],
+            "数据工具": ["解析JSON", "生成JSON", "读JSON", "写JSON"],
+            "网络请求": ["发起请求", "发GET", "发POST", "读响应JSON", "发GET_JSON", "发POST_JSON"],
+            "本地数据库": ["打开数据库", "执行SQL", "查询SQL", "关闭数据库", "开始事务", "提交事务", "回滚事务"],
+            "图形界面": [
+                "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面",
+                "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
+            ],
+            "画板": [
+                "画布", "标题", "图标", "向前走", "向后走", "左转", "右转", "抬笔", "落笔", "画笔颜色",
+                "背景颜色", "去", "笔粗", "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画",
+                "刷新画面", "清除", "写字", "开始监听", "绑定按键", "计算距离", "当前X", "当前Y",
+            ],
+        }
 
     def setup_ui(self):
         # 顶部工具栏 (更窄，更紧凑)
@@ -311,6 +331,59 @@ class 易码IDE:
         self.outline_listbox.bind("<Double-Button-1>", self.on_outline_activate)
         self.outline_listbox.bind("<Return>", self.on_outline_activate)
         self.outline_listbox.bind("<ButtonRelease-1>", self._outline_update_status)
+
+        # 语法/语义问题区（可点击跳转）
+        issue_top = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg)
+        issue_top.pack(fill=tk.X, padx=8, pady=(0, 4))
+
+        tk.Label(
+            issue_top,
+            text="问题列表 ISSUES",
+            font=("Microsoft YaHei", 8, "bold"),
+            bg=self.theme_sidebar_bg,
+            fg="#888888",
+            anchor="w"
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.issue_count_var = tk.StringVar(value="0")
+        tk.Label(
+            issue_top,
+            textvariable=self.issue_count_var,
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_sidebar_bg,
+            fg="#8FB3FF",
+            anchor="e",
+        ).pack(side=tk.RIGHT)
+
+        issue_container = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg)
+        issue_container.pack(fill=tk.X, padx=8, pady=(0, 10))
+
+        self.issue_listbox = tk.Listbox(
+            issue_container,
+            height=7,
+            font=self.font_ui,
+            bg=self.theme_sidebar_bg,
+            fg=self.theme_fg,
+            selectbackground="#0E639C",
+            selectforeground="#FFFFFF",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#3E3E42",
+            relief="flat"
+        )
+        issue_vsb = ttk.Scrollbar(issue_container, orient="vertical", command=self.issue_listbox.yview)
+        issue_hsb = ttk.Scrollbar(issue_container, orient="horizontal", command=self.issue_listbox.xview)
+        self.issue_listbox.configure(yscrollcommand=issue_vsb.set, xscrollcommand=issue_hsb.set)
+
+        self.issue_listbox.grid(column=0, row=0, sticky="nsew")
+        issue_vsb.grid(column=1, row=0, sticky="ns")
+        issue_hsb.grid(column=0, row=1, sticky="ew")
+        issue_container.grid_columnconfigure(0, weight=1)
+        issue_container.grid_rowconfigure(0, weight=1)
+
+        self.issue_listbox.bind("<Double-Button-1>", self.on_issue_activate)
+        self.issue_listbox.bind("<Return>", self.on_issue_activate)
+        self.issue_listbox.bind("<ButtonRelease-1>", self._issue_update_status)
         
         # 初始给左侧多分配一点空间，防止文字被遮挡
         sidebar_default_width = int(250 * self.dpi_scale)
@@ -602,13 +675,167 @@ class 易码IDE:
         if not tab_id or tab_id not in self.tabs_data or not editor:
             return "break"
 
-        diagnostic = self.tabs_data[tab_id].get("diagnostic")
-        if not diagnostic:
+        问题列表 = self._构建问题列表(tab_id)
+        if not 问题列表:
             self.status_main_var.set("当前没有可跳转的语法/语义问题")
             return "break"
 
-        line = max(1, int(diagnostic.get("line") or 1))
-        col = diagnostic.get("col")
+        导航索引 = int(self.tabs_data[tab_id].get("diagnostic_nav_index", 0) or 0)
+        目标项 = 问题列表[导航索引 % len(问题列表)]
+        self.tabs_data[tab_id]["diagnostic_nav_index"] = (导航索引 + 1) % len(问题列表)
+
+        line = max(1, int(目标项.get("line") or 1))
+        col = 目标项.get("col")
+        col_index = max(0, int(col) - 1) if col else 0
+        target = f"{line}.{col_index}"
+
+        if hasattr(self, "issue_listbox"):
+            try:
+                self.issue_listbox.selection_clear(0, tk.END)
+                self.issue_listbox.selection_set(导航索引 % len(问题列表))
+                self.issue_listbox.activate(导航索引 % len(问题列表))
+            except tk.TclError:
+                pass
+
+        try:
+            editor.mark_set("insert", target)
+            editor.see(target)
+            editor.focus_set()
+            self._highlight_current_line()
+            self._update_cursor_status()
+            self.status_main_var.set(
+                f"已定位问题（{(导航索引 % len(问题列表)) + 1}/{len(问题列表)}）：第 {line} 行"
+                + (f"，第 {col} 列" if col else "")
+                + f" - {目标项.get('message', '')}"
+            )
+        except tk.TclError:
+            self.status_main_var.set("错误位置定位失败（行列已变化）")
+        return "break"
+
+    def _构建问题列表(self, tab_id):
+        if not tab_id or tab_id not in self.tabs_data:
+            return []
+
+        data = self.tabs_data[tab_id]
+        结果 = []
+        去重键 = set()
+
+        diagnostic = data.get("diagnostic")
+        if diagnostic:
+            is_warn = str(diagnostic.get("type", "")) == "语义提示"
+            if not is_warn:
+                行号 = int(diagnostic.get("line") or 1)
+                键 = ("error", 行号, diagnostic.get("col"), diagnostic.get("message", ""), "语法")
+                if 键 not in 去重键:
+                    去重键.add(键)
+                    结果.append({
+                        "level": "error",
+                        "line": 行号,
+                        "col": diagnostic.get("col"),
+                        "message": diagnostic.get("message", ""),
+                        "type": diagnostic.get("type", "语法错误"),
+                        "category": "语法",
+                    })
+
+        for warn in data.get("semantic_warnings", []) or []:
+            行号 = int(warn.get("line") or 1)
+            分类 = str(warn.get("category", "语义") or "语义")
+            键 = ("warn", 行号, warn.get("col"), warn.get("message", ""), 分类)
+            if 键 in 去重键:
+                continue
+            去重键.add(键)
+            结果.append({
+                "level": "warn",
+                "line": 行号,
+                "col": warn.get("col"),
+                "message": warn.get("message", ""),
+                "type": warn.get("type", "语义提示"),
+                "category": 分类,
+            })
+
+        return 结果
+
+    def _refresh_issue_list(self):
+        if not hasattr(self, "issue_listbox"):
+            return
+        tab_id = self._get_current_tab_id()
+        if not tab_id or tab_id not in self.tabs_data:
+            try:
+                self.issue_listbox.delete(0, tk.END)
+                self.issue_listbox.insert(tk.END, "(当前文件无语法/语义问题)")
+                self.issue_listbox.itemconfig(0, foreground="#777777")
+                self.issue_count_var.set("0")
+            except tk.TclError:
+                pass
+            return
+
+        问题列表 = self._构建问题列表(tab_id)
+        self.tabs_data[tab_id]["issue_items"] = 问题列表
+        self.tabs_data[tab_id]["diagnostic_nav_index"] = 0
+
+        try:
+            self.issue_listbox.delete(0, tk.END)
+        except tk.TclError:
+            return
+
+        if not 问题列表:
+            self.issue_listbox.insert(tk.END, "(当前文件无语法/语义问题)")
+            try:
+                self.issue_listbox.itemconfig(0, foreground="#777777")
+            except tk.TclError:
+                pass
+            self.issue_count_var.set("0")
+            return
+
+        self.issue_count_var.set(str(len(问题列表)))
+        for i, item in enumerate(问题列表):
+            if item["level"] == "error":
+                前缀 = "[错]"
+            else:
+                分类 = str(item.get("category", "语义") or "语义")
+                前缀 = "[精引]" if 分类 == "精确引入" else "[提]"
+            消息 = str(item.get("message", "")).strip()
+            显示文本 = f"{前缀} L{item['line']} {消息}"
+            self.issue_listbox.insert(tk.END, 显示文本)
+            try:
+                颜色 = "#FFAB91" if item["level"] == "error" else "#FFD27F"
+                self.issue_listbox.itemconfig(i, foreground=颜色)
+            except tk.TclError:
+                pass
+
+        self.issue_listbox.selection_clear(0, tk.END)
+        self.issue_listbox.selection_set(0)
+        self.issue_listbox.activate(0)
+
+    def _get_selected_issue_item(self):
+        tab_id = self._get_current_tab_id()
+        if not tab_id or tab_id not in self.tabs_data:
+            return None
+        selection = self.issue_listbox.curselection() if hasattr(self, "issue_listbox") else ()
+        if not selection:
+            return None
+        idx = selection[0]
+        items = self.tabs_data[tab_id].get("issue_items", [])
+        if idx < 0 or idx >= len(items):
+            return None
+        return items[idx]
+
+    def _issue_update_status(self, event=None):
+        item = self._get_selected_issue_item()
+        if not item:
+            return
+        级别文本 = "错误" if item.get("level") == "error" else "提示"
+        分类文本 = "语法" if item.get("level") == "error" else str(item.get("category", "语义") or "语义")
+        self.status_main_var.set(f"问题列表：{级别文本}/{分类文本}（第 {item['line']} 行）- {item.get('message', '')}")
+
+    def on_issue_activate(self, event=None):
+        item = self._get_selected_issue_item()
+        editor = self._get_current_editor()
+        if not item or not editor:
+            return "break"
+
+        line = max(1, int(item.get("line") or 1))
+        col = item.get("col")
         col_index = max(0, int(col) - 1) if col else 0
         target = f"{line}.{col_index}"
 
@@ -619,12 +846,12 @@ class 易码IDE:
             self._highlight_current_line()
             self._update_cursor_status()
             self.status_main_var.set(
-                f"已定位错误：第 {line} 行"
+                f"已定位问题：第 {line} 行"
                 + (f"，第 {col} 列" if col else "")
-                + f" - {diagnostic.get('message', '')}"
+                + f" - {item.get('message', '')}"
             )
         except tk.TclError:
-            self.status_main_var.set("错误位置定位失败（行列已变化）")
+            self.status_main_var.set("问题位置定位失败（行列已变化）")
         return "break"
 
     def _update_status_main(self):
@@ -730,13 +957,109 @@ class 易码IDE:
         名称集.discard("")
         return 名称集, 函数签名
 
-    def _语义分析(self, 语法树):
+    def _语义模块搜索路径(self, tab_id=None):
+        路径列表 = []
+
+        if tab_id and tab_id in self.tabs_data:
+            文件路径 = self.tabs_data[tab_id].get("filepath")
+            if 文件路径 and os.path.isfile(文件路径):
+                基础目录 = os.path.dirname(os.path.abspath(文件路径))
+                路径列表.extend([基础目录, os.path.join(基础目录, "示例")])
+
+        路径列表.extend([
+            self.workspace_dir,
+            os.path.join(self.workspace_dir, "示例"),
+            os.getcwd(),
+            os.path.join(os.getcwd(), "示例"),
+        ])
+
+        去重列表 = []
+        for 路径 in 路径列表:
+            if not 路径:
+                continue
+            绝对路径 = os.path.abspath(路径)
+            if 绝对路径 not in 去重列表:
+                去重列表.append(绝对路径)
+        return 去重列表
+
+    def _语义定位易码模块(self, 模块名, tab_id=None):
+        名称 = str(模块名 or "").strip().replace("\\", "/")
+        if not 名称:
+            return None
+
+        if os.path.isabs(名称):
+            if os.path.isfile(名称):
+                return os.path.abspath(名称)
+            if os.path.isfile(名称 + ".ym"):
+                return os.path.abspath(名称 + ".ym")
+            return None
+
+        带后缀 = 名称 if 名称.endswith(".ym") else f"{名称}.ym"
+        for 基础路径 in self._语义模块搜索路径(tab_id):
+            候选列表 = [
+                os.path.join(基础路径, 带后缀),
+                os.path.join(基础路径, 名称),
+            ]
+            for 候选 in 候选列表:
+                if os.path.isfile(候选):
+                    return os.path.abspath(候选)
+        return None
+
+    def _语义读取模块导出(self, 模块路径):
+        绝对路径 = os.path.abspath(str(模块路径))
+        try:
+            修改时间 = os.stat(绝对路径).st_mtime_ns
+        except OSError as e:
+            return None, f"读取模块信息失败：{e}"
+
+        缓存项 = self._semantic_module_cache.get(绝对路径)
+        if 缓存项 and 缓存项.get("mtime") == 修改时间:
+            return set(缓存项.get("symbols", set())), 缓存项.get("error")
+
+        try:
+            with open(绝对路径, "r", encoding="utf-8") as f:
+                代码 = f.read()
+            语法树 = 语法分析器(词法分析器(代码).分析()).解析()
+        except Exception as e:
+            错误文本 = f"模块解析失败：{e}"
+            self._semantic_module_cache[绝对路径] = {"mtime": 修改时间, "symbols": set(), "error": 错误文本}
+            return None, 错误文本
+
+        导出符号 = set()
+        for 语句 in getattr(语法树, "语句列表", []) or []:
+            类型名 = type(语句).__name__
+            if 类型名 == "变量设定节点":
+                名称 = getattr(语句, "名称", "")
+                if 名称:
+                    导出符号.add(名称)
+            elif 类型名 == "定义函数节点":
+                名称 = getattr(语句, "函数名", "")
+                if 名称:
+                    导出符号.add(名称)
+            elif 类型名 == "图纸定义节点":
+                名称 = getattr(语句, "图纸名", "")
+                if 名称:
+                    导出符号.add(名称)
+            elif 类型名 == "引入语句节点":
+                名称 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
+                if 名称:
+                    导出符号.add(名称)
+            elif 类型名 == "精确引入语句节点":
+                名称 = getattr(语句, "功能名", "")
+                if 名称:
+                    导出符号.add(名称)
+
+        self._semantic_module_cache[绝对路径] = {"mtime": 修改时间, "symbols": set(导出符号), "error": None}
+        return 导出符号, None
+
+    def _语义分析(self, 语法树, tab_id=None):
         警告列表 = []
         已记录 = set()
         内置名称 = set(self.builtin_words)
         内置名称.update({"对", "错", "空"})
+        内置模块导出 = self._builtin_module_exports()
 
-        def 记警告(行号, 消息, 列号=None):
+        def 记警告(行号, 消息, 列号=None, 分类="语义"):
             try:
                 行号值 = max(1, int(行号 or 1))
             except (ValueError, TypeError):
@@ -745,7 +1068,8 @@ class 易码IDE:
                 列号值 = int(列号) if 列号 else None
             except (ValueError, TypeError):
                 列号值 = None
-            键 = (行号值, 列号值, 消息)
+            分类值 = str(分类 or "语义")
+            键 = (行号值, 列号值, 消息, 分类值)
             if 键 in 已记录:
                 return
             已记录.add(键)
@@ -754,6 +1078,7 @@ class 易码IDE:
                 "col": 列号值,
                 "message": 消息,
                 "type": "语义提示",
+                "category": 分类值,
             })
 
         def 名称已定义(名字, 作用域栈):
@@ -772,7 +1097,78 @@ class 易码IDE:
                     return 函数字典[名字]
             return None
 
-        def 分析表达式(节点, 作用域栈, 函数栈):
+        def 语句定义名称信息(语句):
+            类型名 = type(语句).__name__
+            if 类型名 == "定义函数节点":
+                名称 = getattr(语句, "函数名", "")
+                return (名称, "功能", getattr(语句, "行号", 1)) if 名称 else None
+            if 类型名 == "图纸定义节点":
+                名称 = getattr(语句, "图纸名", "")
+                return (名称, "图纸", getattr(语句, "行号", 1)) if 名称 else None
+            if 类型名 == "引入语句节点":
+                名称 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
+                return (名称, "模块别名", getattr(语句, "行号", 1)) if 名称 else None
+            if 类型名 == "精确引入语句节点":
+                名称 = getattr(语句, "功能名", "")
+                return (名称, "精确引入名称", getattr(语句, "行号", 1)) if 名称 else None
+            return None
+
+        def 检查参数重复(参数列表, 函数名, 行号, 类型名描述):
+            已有 = set()
+            for 参数 in 参数列表 or []:
+                if 参数 in 已有:
+                    记警告(行号, f"{类型名描述}【{函数名}】的参数【{参数}】重复定义。")
+                else:
+                    已有.add(参数)
+
+        def 收集块内直接赋值名(语句列表):
+            名称集 = set()
+            for 语句 in 语句列表 or []:
+                if type(语句).__name__ == "变量设定节点":
+                    名称 = getattr(语句, "名称", "")
+                    if 名称:
+                        名称集.add(名称)
+            return 名称集
+
+        def 检查精确引入(语句):
+            模块名 = str(getattr(语句, "模块名", "") or "").strip()
+            功能名 = str(getattr(语句, "功能名", "") or "").strip()
+            行号 = getattr(语句, "行号", 1)
+            if not 模块名 or not 功能名:
+                return
+
+            内置导出 = set(内置模块导出.get(模块名, []) or [])
+            if 模块名 in 内置模块导出:
+                if 功能名 not in 内置导出:
+                    记警告(行号, f"内置模块【{模块名}】不存在名称【{功能名}】。", 分类="精确引入")
+                return
+
+            模块路径 = self._语义定位易码模块(模块名, tab_id=tab_id)
+            if 模块路径:
+                导出符号, 模块错误 = self._语义读取模块导出(模块路径)
+                if 模块错误:
+                    记警告(行号, f"模块【{模块名}】读取失败：{模块错误}", 分类="精确引入")
+                    return
+                if 功能名 not in set(导出符号 or []):
+                    记警告(行号, f"模块【{模块名}】中不存在名称【{功能名}】。", 分类="精确引入")
+                return
+
+            # 不实际导入模块，避免编辑时触发副作用；仅做存在性兜底检查。
+            try:
+                模块规格 = importlib.util.find_spec(模块名)
+            except (ImportError, ValueError, ModuleNotFoundError):
+                模块规格 = None
+
+            if 模块规格 is None:
+                记警告(行号, f"精确引入目标模块【{模块名}】未找到（本地 .ym 与 Python 模块均未命中）。", 分类="精确引入")
+                return
+
+            # 若该 Python 模块已被当前进程加载，则额外检查属性名是否存在。
+            已加载模块 = sys.modules.get(模块名)
+            if 已加载模块 is not None and not hasattr(已加载模块, 功能名):
+                记警告(行号, f"Python 模块【{模块名}】中不存在名称【{功能名}】。", 分类="精确引入")
+
+        def 分析表达式(节点, 作用域栈, 函数栈, 在图纸体=False):
             if 节点 is None:
                 return
             类型名 = type(节点).__name__
@@ -793,57 +1189,57 @@ class 易码IDE:
                     if 期望个数 is not None and 期望个数 != len(参数列表):
                         记警告(getattr(节点, "行号", 1), f"功能【{名字}】参数个数可能不匹配：期望 {期望个数}，实际 {len(参数列表)}。")
                 for 参数 in 参数列表:
-                    分析表达式(参数, 作用域栈, 函数栈)
+                    分析表达式(参数, 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "动态调用节点":
-                分析表达式(getattr(节点, "目标节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "目标节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 for 参数 in getattr(节点, "参数列表", []) or []:
-                    分析表达式(参数, 作用域栈, 函数栈)
+                    分析表达式(参数, 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "二元运算节点":
-                分析表达式(getattr(节点, "左边", None), 作用域栈, 函数栈)
-                分析表达式(getattr(节点, "右边", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "左边", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
+                分析表达式(getattr(节点, "右边", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "一元运算节点":
-                分析表达式(getattr(节点, "操作数", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "操作数", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "属性访问节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "属性设置节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
-                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
+                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "索引访问节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
-                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
+                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "索引设置节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
-                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈)
-                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
+                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
+                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "列表字面量节点":
                 for 项 in getattr(节点, "元素列表", []) or []:
-                    分析表达式(项, 作用域栈, 函数栈)
+                    分析表达式(项, 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "字典字面量节点":
                 for 键节点, 值节点 in getattr(节点, "键值对列表", []) or []:
-                    分析表达式(键节点, 作用域栈, 函数栈)
-                    分析表达式(值节点, 作用域栈, 函数栈)
+                    分析表达式(键节点, 作用域栈, 函数栈, 在图纸体=在图纸体)
+                    分析表达式(值节点, 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "输入表达式节点":
-                分析表达式(getattr(节点, "提示语句表达式", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "提示语句表达式", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
             if 类型名 == "实例化节点":
@@ -851,10 +1247,30 @@ class 易码IDE:
                 if 图纸名 and not 名称已定义(图纸名, 作用域栈):
                     记警告(getattr(节点, "行号", 1), f"图纸【{图纸名}】可能未定义。")
                 for 参数 in getattr(节点, "参数列表", []) or []:
-                    分析表达式(参数, 作用域栈, 函数栈)
+                    分析表达式(参数, 作用域栈, 函数栈, 在图纸体=在图纸体)
                 return
 
-        def 分析代码块(语句列表, 上层作用域栈, 上层函数栈, 额外名称=None, 额外函数签名=None):
+            if 类型名 == "自身属性访问节点":
+                if not 在图纸体:
+                    记警告(getattr(节点, "行号", 1), "【它的】建议只在图纸定义内部使用。")
+                return
+
+            if 类型名 == "自身属性设置节点":
+                if not 在图纸体:
+                    记警告(getattr(节点, "行号", 1), "【它的】建议只在图纸定义内部使用。")
+                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
+                return
+
+        def 分析代码块(
+            语句列表,
+            上层作用域栈,
+            上层函数栈,
+            额外名称=None,
+            额外函数签名=None,
+            在函数体=False,
+            循环层级=0,
+            在图纸体=False,
+        ):
             块声明名, 块函数签名 = self._收集块声明(语句列表)
             本地作用域 = set(块声明名)
             if 额外名称:
@@ -865,58 +1281,149 @@ class 易码IDE:
             当前作用域栈 = list(上层作用域栈) + [本地作用域]
             当前函数栈 = list(上层函数栈) + [本地函数签名]
 
+            同块已定义 = {}
+            for 语句 in 语句列表 or []:
+                定义信息 = 语句定义名称信息(语句)
+                if not 定义信息:
+                    continue
+                名称, 定义类型, 行号 = 定义信息
+                if 名称 in 同块已定义:
+                    前类型, 前行号 = 同块已定义[名称]
+                    记警告(行号, f"名称【{名称}】在同一代码块重复定义（前一次：第 {前行号} 行，类型：{前类型}）。")
+                else:
+                    同块已定义[名称] = (定义类型, 行号)
+
             for 语句 in 语句列表 or []:
                 类型名 = type(语句).__name__
                 if 类型名 == "显示语句节点":
-                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈)
+                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
                 elif 类型名 == "变量设定节点":
-                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈)
+                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
                 elif 类型名 == "如果语句节点":
+                    分支赋值集合列表 = []
                     for 条件, 分支 in getattr(语句, "条件分支列表", []) or []:
-                        分析表达式(条件, 当前作用域栈, 当前函数栈)
-                        分析代码块(分支, 当前作用域栈, 当前函数栈)
+                        分析表达式(条件, 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
+                        分析代码块(分支, 当前作用域栈, 当前函数栈, 在函数体=在函数体, 循环层级=循环层级, 在图纸体=在图纸体)
+                        分支赋值集合列表.append(收集块内直接赋值名(分支))
                     否则分支 = getattr(语句, "否则分支列表", None)
-                    if 否则分支:
-                        分析代码块(否则分支, 当前作用域栈, 当前函数栈)
+                    是否有否则 = 否则分支 is not None
+                    if 是否有否则:
+                        分析代码块(否则分支, 当前作用域栈, 当前函数栈, 在函数体=在函数体, 循环层级=循环层级, 在图纸体=在图纸体)
+                        分支赋值集合列表.append(收集块内直接赋值名(否则分支))
+                    # 只有在存在“否则”时，才认为变量一定会被赋值；将所有分支共同赋值的变量提升到当前块作用域。
+                    if 是否有否则 and 分支赋值集合列表:
+                        必定赋值名 = set.intersection(*分支赋值集合列表)
+                        if 必定赋值名:
+                            当前作用域栈[-1].update(必定赋值名)
                 elif 类型名 == "当循环节点":
-                    分析表达式(getattr(语句, "条件", None), 当前作用域栈, 当前函数栈)
-                    分析代码块(getattr(语句, "循环体", []), 当前作用域栈, 当前函数栈)
+                    分析表达式(getattr(语句, "条件", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
+                    分析代码块(
+                        getattr(语句, "循环体", []),
+                        当前作用域栈,
+                        当前函数栈,
+                        在函数体=在函数体,
+                        循环层级=循环层级 + 1,
+                        在图纸体=在图纸体,
+                    )
                 elif 类型名 == "重复循环节点":
-                    分析表达式(getattr(语句, "次数表达式", None), 当前作用域栈, 当前函数栈)
+                    分析表达式(getattr(语句, "次数表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
                     额外名 = set()
                     变量名 = getattr(语句, "循环变量名", None)
                     if 变量名:
                         额外名.add(变量名)
-                    分析代码块(getattr(语句, "循环体", []), 当前作用域栈, 当前函数栈, 额外名称=额外名)
+                    分析代码块(
+                        getattr(语句, "循环体", []),
+                        当前作用域栈,
+                        当前函数栈,
+                        额外名称=额外名,
+                        在函数体=在函数体,
+                        循环层级=循环层级 + 1,
+                        在图纸体=在图纸体,
+                    )
                 elif 类型名 == "遍历循环节点":
-                    分析表达式(getattr(语句, "列表表达式", None), 当前作用域栈, 当前函数栈)
+                    分析表达式(getattr(语句, "列表表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
                     额外名 = set()
                     元素名 = getattr(语句, "元素名", "")
                     if 元素名:
                         额外名.add(元素名)
-                    分析代码块(getattr(语句, "循环体", []), 当前作用域栈, 当前函数栈, 额外名称=额外名)
+                    分析代码块(
+                        getattr(语句, "循环体", []),
+                        当前作用域栈,
+                        当前函数栈,
+                        额外名称=额外名,
+                        在函数体=在函数体,
+                        循环层级=循环层级 + 1,
+                        在图纸体=在图纸体,
+                    )
                 elif 类型名 == "尝试语句节点":
-                    分析代码块(getattr(语句, "尝试代码块", []), 当前作用域栈, 当前函数栈)
+                    分析代码块(
+                        getattr(语句, "尝试代码块", []),
+                        当前作用域栈,
+                        当前函数栈,
+                        在函数体=在函数体,
+                        循环层级=循环层级,
+                        在图纸体=在图纸体,
+                    )
                     额外名 = set()
                     错误名 = getattr(语句, "错误捕获名", None)
                     if 错误名:
                         额外名.add(错误名)
-                    分析代码块(getattr(语句, "出错代码块", []), 当前作用域栈, 当前函数栈, 额外名称=额外名)
+                    分析代码块(
+                        getattr(语句, "出错代码块", []),
+                        当前作用域栈,
+                        当前函数栈,
+                        额外名称=额外名,
+                        在函数体=在函数体,
+                        循环层级=循环层级,
+                        在图纸体=在图纸体,
+                    )
                 elif 类型名 == "定义函数节点":
-                    参数名 = set(getattr(语句, "参数列表", []) or [])
-                    分析代码块(getattr(语句, "代码块", []), 当前作用域栈, 当前函数栈, 额外名称=参数名)
+                    函数名 = getattr(语句, "函数名", "")
+                    参数列表 = list(getattr(语句, "参数列表", []) or [])
+                    检查参数重复(参数列表, 函数名 or "匿名功能", getattr(语句, "行号", 1), "功能")
+                    参数名 = set(参数列表)
+                    分析代码块(
+                        getattr(语句, "代码块", []),
+                        当前作用域栈,
+                        当前函数栈,
+                        额外名称=参数名,
+                        在函数体=True,
+                        循环层级=0,
+                        在图纸体=在图纸体,
+                    )
                 elif 类型名 == "图纸定义节点":
-                    参数名 = set(getattr(语句, "参数列表", []) or [])
-                    分析代码块(getattr(语句, "代码块", []), 当前作用域栈, 当前函数栈, 额外名称=参数名)
+                    图纸名 = getattr(语句, "图纸名", "")
+                    参数列表 = list(getattr(语句, "参数列表", []) or [])
+                    检查参数重复(参数列表, 图纸名 or "匿名图纸", getattr(语句, "行号", 1), "图纸")
+                    参数名 = set(参数列表)
+                    分析代码块(
+                        getattr(语句, "代码块", []),
+                        当前作用域栈,
+                        当前函数栈,
+                        额外名称=参数名,
+                        在函数体=False,
+                        循环层级=0,
+                        在图纸体=True,
+                    )
                 elif 类型名 == "返回语句节点":
-                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈)
-                elif 类型名 in ("引入语句节点", "精确引入语句节点", "跳出语句节点", "继续语句节点"):
+                    if not 在函数体:
+                        记警告(getattr(语句, "行号", 1), "【返回】建议只在功能内部使用。")
+                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
+                elif 类型名 == "跳出语句节点":
+                    if 循环层级 <= 0:
+                        记警告(getattr(语句, "行号", 1), "【停下】建议只在循环内部使用。")
+                elif 类型名 == "继续语句节点":
+                    if 循环层级 <= 0:
+                        记警告(getattr(语句, "行号", 1), "【略过】建议只在循环内部使用。")
+                elif 类型名 == "引入语句节点":
                     continue
+                elif 类型名 == "精确引入语句节点":
+                    检查精确引入(语句)
                 else:
-                    分析表达式(语句, 当前作用域栈, 当前函数栈)
+                    分析表达式(语句, 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
 
         顶层语句 = getattr(语法树, "语句列表", []) or []
-        分析代码块(顶层语句, [set(内置名称)], [dict()])
+        分析代码块(顶层语句, [set(内置名称)], [dict()], 在函数体=False, 循环层级=0, 在图纸体=False)
         警告列表.sort(key=lambda x: (x.get("line") or 1, x.get("col") or 0))
         return 警告列表
 
@@ -933,13 +1440,16 @@ class 易码IDE:
         if not code.strip():
             self.tabs_data[tab_id]["diagnostic"] = None
             self.tabs_data[tab_id]["semantic_warnings"] = []
+            self.tabs_data[tab_id]["issue_items"] = []
+            self.tabs_data[tab_id]["diagnostic_nav_index"] = 0
             self._set_diagnostic_status("语法检查：等待输入", level="info")
+            self._refresh_issue_list()
             return
 
         try:
             tokens = 词法分析器(code).分析()
             语法树 = 语法分析器(tokens).解析()
-            语义警告 = self._语义分析(语法树)
+            语义警告 = self._语义分析(语法树, tab_id=tab_id)
             self.tabs_data[tab_id]["semantic_warnings"] = 语义警告
 
             if 语义警告:
@@ -960,6 +1470,7 @@ class 易码IDE:
             else:
                 self.tabs_data[tab_id]["diagnostic"] = None
                 self._set_diagnostic_status("语法检查：通过", level="ok")
+            self._refresh_issue_list()
         except 易码错误 as e:
             line = int(e.行号) if e.行号 else 1
             line = max(1, line)
@@ -982,10 +1493,12 @@ class 易码IDE:
                 f"{e.错误类型}：第 {line} 行{col_text} - {error_text}",
                 level="error"
             )
+            self._refresh_issue_list()
         except Exception as e:
             self.tabs_data[tab_id]["diagnostic"] = None
             self.tabs_data[tab_id]["semantic_warnings"] = []
             self._set_diagnostic_status(f"语法检查失败：{e}", level="error")
+            self._refresh_issue_list()
 
     def _handle_return(self, event=None):
         if self.autocomplete_listbox.winfo_ismapped():
@@ -2990,6 +3503,8 @@ class 易码IDE:
             "dirty": False,
             "diagnostic": None,
             "semantic_warnings": [],
+            "issue_items": [],
+            "diagnostic_nav_index": 0,
             "folds": {},
             "outline_items": [],
             "multi_cursor": {"query": "", "stage": "ranges", "ranges": [], "points": [], "last_abs": -1}

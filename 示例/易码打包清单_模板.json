@@ -1,0 +1,13 @@
+{
+  "hidden_imports": [
+    "requests",
+    "PIL.Image"
+  ],
+  "datas": [
+    "assets/logo.png",
+    {
+      "src": "assets",
+      "dest": "assets"
+    }
+  ]
+}

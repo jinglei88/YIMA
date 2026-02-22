@@ -120,10 +120,12 @@ class 重复循环节点(AST节点):
         self.循环变量名 = 循环变量名
 
 class 跳出语句节点(AST节点):
-    pass
+    def __init__(self, 行号=0):
+        self.行号 = 行号
 
 class 继续语句节点(AST节点):
-    pass
+    def __init__(self, 行号=0):
+        self.行号 = 行号
 
 class 定义函数节点(AST节点):
     def __init__(self, 函数名, 参数列表, 代码块, 行号=0):
@@ -149,8 +151,9 @@ class 输入表达式节点(AST节点):
         self.提示语句表达式 = 提示语句表达式
 
 class 返回语句节点(AST节点):
-    def __init__(self, 表达式):
+    def __init__(self, 表达式, 行号=0):
         self.表达式 = 表达式
+        self.行号 = 行号
 
 class 遍历循环节点(AST节点):
     def __init__(self, 列表表达式, 元素名, 循环体, 行号=0):
