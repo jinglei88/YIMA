@@ -87,7 +87,7 @@ class 易码IDE:
         win_w = min(int(1200 * self.dpi_scale), max(900, int(screen_w * 0.94)))
         win_h = min(int(820 * self.dpi_scale), max(650, int(screen_h * 0.90)))
         self.root.geometry(f"{win_w}x{win_h}")
-        self.root.configure(bg="#f5f6f7")
+        self.root.configure(bg="#1A1E24")
         
         # 字体设定（使用大白话、符合国人习惯的微软雅黑）
         self.font_code = ("Microsoft YaHei", 10)
@@ -95,13 +95,21 @@ class 易码IDE:
         
         # 现代暗黑专业主题色调 (VS Code 风)
         self.theme_bg = "#1E1E1E"          # 编辑器 & 控制台主背景
-        self.theme_sidebar_bg = "#252526"  # 侧边栏文件树背景
-        self.theme_toolbar_bg = "#333333"  # 顶部工具栏 & 状态条背景
+        self.theme_sidebar_bg = "#1A202A"  # 侧边栏文件树背景
+        self.theme_toolbar_bg = "#1C222B"  # 顶部工具栏 & 状态条背景
         self.theme_fg = "#CCCCCC"          # 默认普通文字颜色
         self.theme_line_bg = "#2D2D30"     # 当前行高亮颜色
         self.theme_gutter_bg = "#1E1E1E"   # 行号区背景色与主区融合
         self.theme_gutter_fg = "#858585"   # 行号文字颜色
-        self.theme_sash = "#454545"        # 分割线颜色 (稍微提亮使其起分隔作用但不变宽)
+        self.theme_sash = "#2B3544"        # 分割线颜色 (稍微提亮使其起分隔作用但不变宽)
+        self.theme_toolbar_group_bg = "#242C37"
+        self.theme_toolbar_border = "#323D4C"
+        self.theme_toolbar_hover = "#2E3845"
+        self.theme_toolbar_fg = "#DFE6EE"
+        self.theme_toolbar_muted = "#9DABBE"
+        self.theme_panel_bg = "#202833"
+        self.theme_panel_inner_bg = "#171D26"
+        self.theme_accent = "#1E7BC8"
         
         # 定义代码片段 (Snippets) 字典
         self.snippets = {
@@ -141,16 +149,16 @@ class 易码IDE:
         scaled_rowheight = int(28 * self.dpi_scale)
         
         # 定制 Treeview
-        style.configure("Treeview", font=self.font_ui, rowheight=scaled_rowheight, 
-                        background=self.theme_sidebar_bg, foreground=self.theme_fg, fieldbackground=self.theme_sidebar_bg, borderwidth=0)
-        style.map('Treeview', background=[('selected', '#37373D')], foreground=[('selected', '#FFFFFF')])
-        style.configure("Treeview.Heading", font=("Microsoft YaHei", 9, "bold"), background=self.theme_sidebar_bg, foreground="#CCCCCC", borderwidth=0)
-        
+        style.configure("Treeview", font=self.font_ui, rowheight=scaled_rowheight,
+                        background=self.theme_panel_inner_bg, foreground=self.theme_fg, fieldbackground=self.theme_panel_inner_bg, borderwidth=0)
+        style.map("Treeview", background=[("selected", self.theme_accent)], foreground=[("selected", "#FFFFFF")])
+        style.configure("Treeview.Heading", font=("Microsoft YaHei", 9, "bold"), background=self.theme_panel_bg, foreground="#CED8E5", borderwidth=0)
+
         # 定制暗黑简约滚动条
-        style.configure("Vertical.TScrollbar", background="#3E3E42", troughcolor=self.theme_sidebar_bg, bordercolor=self.theme_sidebar_bg, arrowcolor="#CCCCCC", relief="flat", borderwidth=0)
-        style.configure("Horizontal.TScrollbar", background="#3E3E42", troughcolor=self.theme_sidebar_bg, bordercolor=self.theme_sidebar_bg, arrowcolor="#CCCCCC", relief="flat", borderwidth=0)
-        style.map("Vertical.TScrollbar", background=[('active', '#555558')])
-        style.map("Horizontal.TScrollbar", background=[('active', '#555558')])
+        style.configure("Vertical.TScrollbar", background="#3A4555", troughcolor=self.theme_panel_inner_bg, bordercolor=self.theme_panel_inner_bg, arrowcolor="#B6C5D8", relief="flat", borderwidth=0)
+        style.configure("Horizontal.TScrollbar", background="#3A4555", troughcolor=self.theme_panel_inner_bg, bordercolor=self.theme_panel_inner_bg, arrowcolor="#B6C5D8", relief="flat", borderwidth=0)
+        style.map("Vertical.TScrollbar", background=[("active", "#4C5D73")])
+        style.map("Horizontal.TScrollbar", background=[("active", "#4C5D73")])
         
         # 定制 Notebook 标签页无缝沉浸式外观
         style.configure("TNotebook", background=self.theme_bg, borderwidth=0, padding=0)
@@ -206,45 +214,201 @@ class 易码IDE:
             ],
         }
 
+    def _style_scrolledtext_vbar(self, text_widget, parent=None):
+        """
+        统一 ScrolledText 滚动条为暗色。
+        - 若传 parent：隐藏内置 tk.Scrollbar，改用 ttk.Scrollbar（推荐，跨平台稳定）
+        - 若不传 parent：兜底样式化内置 tk.Scrollbar
+        """
+        try:
+            frame = getattr(text_widget, "frame", None)
+            if frame:
+                frame.configure(bg=self.theme_bg, bd=0, highlightthickness=0)
+        except tk.TclError:
+            pass
+
+        if parent is not None:
+            内置条 = getattr(text_widget, "vbar", None)
+            if 内置条:
+                try:
+                    内置条.pack_forget()
+                except tk.TclError:
+                    pass
+            外挂条 = ttk.Scrollbar(parent, orient="vertical", command=text_widget.yview)
+            外挂条.pack(side=tk.RIGHT, fill=tk.Y)
+            text_widget.configure(yscrollcommand=外挂条.set)
+            text_widget.vbar = 外挂条
+            return
+
+        vbar = getattr(text_widget, "vbar", None)
+        if not vbar:
+            return
+
+        scrollbar_width = max(10, int(11 * self.dpi_scale))
+        style_options = {
+            "width": scrollbar_width,
+            "bg": "#3A4555",
+            "activebackground": "#4C5D73",
+            "troughcolor": self.theme_panel_inner_bg,
+            "relief": "flat",
+            "borderwidth": 0,
+            "highlightthickness": 0,
+            "elementborderwidth": 0,
+            "highlightbackground": self.theme_panel_inner_bg,
+            "highlightcolor": self.theme_panel_inner_bg,
+        }
+        for key, value in style_options.items():
+            try:
+                vbar.configure(**{key: value})
+            except tk.TclError:
+                pass
+
     def setup_ui(self):
-        # 顶部工具栏 (更窄，更紧凑)
-        toolbar = tk.Frame(self.root, bg=self.theme_toolbar_bg, pady=4, padx=10)
+        # 顶部现代化菜单栏（分组 + 主按钮）
+        toolbar_shell = tk.Frame(
+            self.root,
+            bg=self.theme_toolbar_bg,
+            highlightthickness=1,
+            highlightbackground=self.theme_toolbar_border,
+            highlightcolor=self.theme_toolbar_border,
+            bd=0,
+        )
+        toolbar_shell.pack(fill=tk.X)
+
+        toolbar = tk.Frame(toolbar_shell, bg=self.theme_toolbar_bg, padx=12, pady=8)
         toolbar.pack(fill=tk.X)
-        
-        def create_tool_btn(parent, text, cmd, bg=self.theme_toolbar_bg, fg=self.theme_fg, font=self.font_ui):
-            return tk.Button(parent, text=text, font=font, bg=bg, fg=fg, activebackground="#505050", activeforeground="#FFFFFF", relief="flat", borderwidth=0, cursor="hand2", padx=10, pady=5, command=cmd)
-            
-        btn_run = create_tool_btn(toolbar, "▶ 运行代码", self.run_code, bg="#3C813F", fg="#FFFFFF", font=("Microsoft YaHei", 11, "bold"))
-        btn_run.pack(side=tk.LEFT, padx=10)
-        
-        btn_new_proj = create_tool_btn(toolbar, "📁 新建项目", self.new_project)
-        btn_new_proj.pack(side=tk.LEFT, padx=5)
 
-        btn_open_proj = create_tool_btn(toolbar, "📂 打开项目", self.open_project)
-        btn_open_proj.pack(side=tk.LEFT, padx=5)
+        def create_tool_btn(parent, text, cmd, variant="ghost", font=None, compact=False):
+            style_map = {
+                "ghost": {
+                    "bg": self.theme_toolbar_group_bg,
+                    "fg": self.theme_toolbar_fg,
+                    "hover_bg": self.theme_toolbar_hover,
+                    "hover_fg": "#FFFFFF",
+                    "border": self.theme_toolbar_border,
+                    "hover_border": "#4F627B",
+                },
+                "run": {
+                    "bg": "#2E7D32",
+                    "fg": "#FFFFFF",
+                    "hover_bg": "#3D9742",
+                    "hover_fg": "#FFFFFF",
+                    "border": "#459E4A",
+                    "hover_border": "#67B96C",
+                },
+                "accent": {
+                    "bg": "#0E639C",
+                    "fg": "#FFFFFF",
+                    "hover_bg": "#1577B8",
+                    "hover_fg": "#FFFFFF",
+                    "border": "#2D82BC",
+                    "hover_border": "#4A9DCE",
+                },
+                "subtle": {
+                    "bg": self.theme_panel_bg,
+                    "fg": "#C9D4E1",
+                    "hover_bg": self.theme_toolbar_hover,
+                    "hover_fg": "#FFFFFF",
+                    "border": self.theme_toolbar_border,
+                    "hover_border": "#4F627B",
+                },
+            }
+            conf = style_map.get(variant, style_map["ghost"])
+            pad_x = 8 if compact else 10
+            pad_y = 2 if compact else 4
+            btn = tk.Button(
+                parent,
+                text=text,
+                command=cmd,
+                font=font or self.font_ui,
+                bg=conf["bg"],
+                fg=conf["fg"],
+                activebackground=conf["hover_bg"],
+                activeforeground=conf["hover_fg"],
+                relief="flat",
+                borderwidth=0,
+                highlightthickness=1,
+                highlightbackground=conf["border"],
+                highlightcolor=conf["border"],
+                cursor="hand2",
+                padx=pad_x,
+                pady=pad_y,
+                takefocus=0,
+            )
+            def _enter(_e):
+                btn.configure(
+                    bg=conf["hover_bg"],
+                    fg=conf["hover_fg"],
+                    highlightbackground=conf["hover_border"],
+                    highlightcolor=conf["hover_border"],
+                )
+            def _leave(_e):
+                btn.configure(
+                    bg=conf["bg"],
+                    fg=conf["fg"],
+                    highlightbackground=conf["border"],
+                    highlightcolor=conf["border"],
+                )
+            btn.bind("<Enter>", _enter)
+            btn.bind("<Leave>", _leave)
+            return btn
 
-        btn_recent_proj = create_tool_btn(toolbar, "🕘 历史项目", self.open_recent_project_menu)
-        btn_recent_proj.pack(side=tk.LEFT, padx=5)
-        
-        tk.Label(toolbar, text=" | ", bg=self.theme_toolbar_bg, fg="#555555").pack(side=tk.LEFT)
+        def create_tool_group(group_name, items):
+            group_frame = tk.Frame(
+                toolbar,
+                bg=self.theme_toolbar_group_bg,
+                highlightthickness=1,
+                highlightbackground=self.theme_toolbar_border,
+                highlightcolor=self.theme_toolbar_border,
+                bd=0,
+            )
+            group_frame.pack(side=tk.LEFT, padx=(0, 8))
+            tk.Label(
+                group_frame,
+                text=group_name,
+                bg=self.theme_toolbar_group_bg,
+                fg=self.theme_toolbar_muted,
+                font=("Microsoft YaHei", 8, "bold"),
+                padx=8,
+            ).pack(side=tk.LEFT, pady=4)
+            for btn_text, btn_cmd in items:
+                create_tool_btn(group_frame, btn_text, btn_cmd, variant="ghost").pack(side=tk.LEFT, padx=(0, 4), pady=4)
+            return group_frame
 
-        btn_open = create_tool_btn(toolbar, "📂 打开代码(单文件)", self.open_file)
-        btn_open.pack(side=tk.LEFT, padx=5)
-        
-        btn_save = create_tool_btn(toolbar, "💾 保存代码", self.save_file)
-        btn_save.pack(side=tk.LEFT, padx=5)
+        right_actions = tk.Frame(toolbar, bg=self.theme_toolbar_bg)
+        right_actions.pack(side=tk.RIGHT)
+        create_tool_btn(
+            right_actions,
+            "导出软件(EXE)",
+            self.export_exe,
+            variant="accent",
+            font=("Microsoft YaHei", 10, "bold"),
+        ).pack(side=tk.RIGHT, ipadx=6)
 
-        btn_find = create_tool_btn(toolbar, "🔎 查找/替换", self.open_find_dialog)
-        btn_find.pack(side=tk.LEFT, padx=5)
+        create_tool_btn(
+            toolbar,
+            "运行代码",
+            self.run_code,
+            variant="run",
+            font=("Microsoft YaHei", 10, "bold"),
+        ).pack(side=tk.LEFT, padx=(0, 10), ipadx=6)
 
-        btn_multi = create_tool_btn(toolbar, "🎯 同词多光标", self.multi_cursor_add_next)
-        btn_multi.pack(side=tk.LEFT, padx=5)
+        create_tool_group("项目", [
+            ("新建", self.new_project),
+            ("打开", self.open_project),
+            ("历史", self.open_recent_project_menu),
+        ])
+        create_tool_group("文件", [
+            ("打开单文件", self.open_file),
+            ("保存代码", self.save_file),
+        ])
+        create_tool_group("编辑", [
+            ("查找替换", self.open_find_dialog),
+            ("同词多光标", self.multi_cursor_add_next),
+            ("重命名", self.rename_symbol),
+        ])
 
-        btn_rename = create_tool_btn(toolbar, "✏️ 重命名符号", self.rename_symbol)
-        btn_rename.pack(side=tk.LEFT, padx=5)
-
-        btn_export = create_tool_btn(toolbar, "📦 导出软件(EXE)", self.export_exe, bg="#0E639C", fg="#FFFFFF")
-        btn_export.pack(side=tk.RIGHT, padx=5)
+        tk.Frame(self.root, height=1, bg=self.theme_toolbar_border, bd=0).pack(fill=tk.X)
 
         # 主分割区 (外层水平分割：左拉侧边栏，右拉主界面)
         # 将分割线收拢到极致 1px
@@ -253,74 +417,116 @@ class 易码IDE:
         
         # --- 左侧：资源管理器 (Sidebar) ---
         sidebar_frame = tk.Frame(self.main_paned, bg=self.theme_sidebar_bg)
-        tk.Label(sidebar_frame, text="资源管理 EXPLORER", font=("Microsoft YaHei", 8, "bold"), bg=self.theme_sidebar_bg, fg="#888888", anchor="w", padx=15).pack(fill=tk.X, pady=(15, 8))
-        
-        # 文件列表树容器
-        tree_container = tk.Frame(sidebar_frame)
-        tree_container.pack(fill=tk.BOTH, expand=True)
-        
+
+        sidebar_header = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg, padx=10, pady=10)
+        sidebar_header.pack(fill=tk.X)
+        title_wrap = tk.Frame(sidebar_header, bg=self.theme_sidebar_bg)
+        title_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(
+            title_wrap,
+            text="资源管理器",
+            font=("Microsoft YaHei", 10, "bold"),
+            bg=self.theme_sidebar_bg,
+            fg="#E7EDF7",
+            anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            title_wrap,
+            text="EXPLORER",
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_sidebar_bg,
+            fg="#8FA1B8",
+            anchor="w",
+        ).pack(anchor="w")
+        create_tool_btn(
+            sidebar_header,
+            "刷新",
+            self.refresh_file_tree,
+            variant="subtle",
+            compact=True,
+            font=("Microsoft YaHei", 8),
+        ).pack(side=tk.RIGHT, padx=(6, 0))
+
+        # 文件列表树容器（卡片化）
+        tree_card = tk.Frame(
+            sidebar_frame,
+            bg=self.theme_panel_bg,
+            highlightthickness=1,
+            highlightbackground=self.theme_toolbar_border,
+            highlightcolor=self.theme_toolbar_border,
+            bd=0,
+        )
+        tree_card.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        tree_container = tk.Frame(tree_card, bg=self.theme_panel_inner_bg)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
         self.tree = ttk.Treeview(tree_container, selectmode="browse")
-        
+
         # 滚动条 (垂直 + 水平)
         vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        self.tree.grid(column=0, row=0, sticky='nsew')
-        vsb.grid(column=1, row=0, sticky='ns')
-        hsb.grid(column=0, row=1, sticky='ew')
-        
+
+        self.tree.grid(column=0, row=0, sticky="nsew")
+        vsb.grid(column=1, row=0, sticky="ns")
+        hsb.grid(column=0, row=1, sticky="ew")
+
         tree_container.grid_columnconfigure(0, weight=1)
         tree_container.grid_rowconfigure(0, weight=1)
 
         # 代码结构大纲区（功能 / 图纸导航 + 折叠）
-        outline_top = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg)
-        outline_top.pack(fill=tk.X, padx=8, pady=(8, 4))
+        outline_section = tk.Frame(
+            sidebar_frame,
+            bg=self.theme_panel_bg,
+            highlightthickness=1,
+            highlightbackground=self.theme_toolbar_border,
+            highlightcolor=self.theme_toolbar_border,
+            bd=0,
+        )
+        outline_section.pack(fill=tk.X, padx=8, pady=(0, 8))
+        outline_top = tk.Frame(outline_section, bg=self.theme_panel_bg, padx=8, pady=6)
+        outline_top.pack(fill=tk.X)
 
         tk.Label(
             outline_top,
             text="代码大纲 OUTLINE",
             font=("Microsoft YaHei", 8, "bold"),
-            bg=self.theme_sidebar_bg,
-            fg="#888888",
-            anchor="w"
+            bg=self.theme_panel_bg,
+            fg="#8FA1B8",
+            anchor="w",
         ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        def create_outline_btn(text, cmd):
-            return tk.Button(
-                outline_top,
-                text=text,
-                command=cmd,
-                font=("Microsoft YaHei", 8),
-                bg=self.theme_toolbar_bg,
-                fg=self.theme_fg,
-                activebackground="#505050",
-                activeforeground="#FFFFFF",
-                relief="flat",
-                borderwidth=0,
-                cursor="hand2",
-                padx=6,
-                pady=2
-            )
+        create_tool_btn(
+            outline_top,
+            "折叠/展开",
+            self.toggle_fold_from_outline,
+            variant="subtle",
+            compact=True,
+            font=("Microsoft YaHei", 8),
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        create_tool_btn(
+            outline_top,
+            "全部展开",
+            self.unfold_all_blocks,
+            variant="subtle",
+            compact=True,
+            font=("Microsoft YaHei", 8),
+        ).pack(side=tk.RIGHT)
 
-        create_outline_btn("折叠/展开", self.toggle_fold_from_outline).pack(side=tk.RIGHT, padx=(4, 0))
-        create_outline_btn("全部展开", self.unfold_all_blocks).pack(side=tk.RIGHT)
-
-        outline_container = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg)
-        outline_container.pack(fill=tk.X, padx=8, pady=(0, 10))
+        outline_container = tk.Frame(outline_section, bg=self.theme_panel_bg, padx=8)
+        outline_container.pack(fill=tk.X, pady=(0, 8))
 
         self.outline_listbox = tk.Listbox(
             outline_container,
             height=9,
             font=self.font_ui,
-            bg=self.theme_sidebar_bg,
+            bg=self.theme_panel_inner_bg,
             fg=self.theme_fg,
-            selectbackground="#0E639C",
+            selectbackground=self.theme_accent,
             selectforeground="#FFFFFF",
             borderwidth=0,
-            highlightthickness=1,
-            highlightbackground="#3E3E42",
-            relief="flat"
+            highlightthickness=0,
+            relief="flat",
         )
         outline_vsb = ttk.Scrollbar(outline_container, orient="vertical", command=self.outline_listbox.yview)
         self.outline_listbox.configure(yscrollcommand=outline_vsb.set)
@@ -333,43 +539,53 @@ class 易码IDE:
         self.outline_listbox.bind("<ButtonRelease-1>", self._outline_update_status)
 
         # 语法/语义问题区（可点击跳转）
-        issue_top = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg)
-        issue_top.pack(fill=tk.X, padx=8, pady=(0, 4))
+        issue_section = tk.Frame(
+            sidebar_frame,
+            bg=self.theme_panel_bg,
+            highlightthickness=1,
+            highlightbackground=self.theme_toolbar_border,
+            highlightcolor=self.theme_toolbar_border,
+            bd=0,
+        )
+        issue_section.pack(fill=tk.X, padx=8, pady=(0, 10))
+        issue_top = tk.Frame(issue_section, bg=self.theme_panel_bg, padx=8, pady=6)
+        issue_top.pack(fill=tk.X)
 
         tk.Label(
             issue_top,
             text="问题列表 ISSUES",
             font=("Microsoft YaHei", 8, "bold"),
-            bg=self.theme_sidebar_bg,
-            fg="#888888",
-            anchor="w"
+            bg=self.theme_panel_bg,
+            fg="#8FA1B8",
+            anchor="w",
         ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self.issue_count_var = tk.StringVar(value="0")
         tk.Label(
             issue_top,
             textvariable=self.issue_count_var,
-            font=("Microsoft YaHei", 8),
-            bg=self.theme_sidebar_bg,
-            fg="#8FB3FF",
+            font=("Microsoft YaHei", 8, "bold"),
+            bg=self.theme_panel_inner_bg,
+            fg="#9FCBFF",
+            padx=8,
+            pady=1,
             anchor="e",
         ).pack(side=tk.RIGHT)
 
-        issue_container = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg)
-        issue_container.pack(fill=tk.X, padx=8, pady=(0, 10))
+        issue_container = tk.Frame(issue_section, bg=self.theme_panel_bg, padx=8)
+        issue_container.pack(fill=tk.X, pady=(0, 8))
 
         self.issue_listbox = tk.Listbox(
             issue_container,
             height=7,
             font=self.font_ui,
-            bg=self.theme_sidebar_bg,
+            bg=self.theme_panel_inner_bg,
             fg=self.theme_fg,
-            selectbackground="#0E639C",
+            selectbackground=self.theme_accent,
             selectforeground="#FFFFFF",
             borderwidth=0,
-            highlightthickness=1,
-            highlightbackground="#3E3E42",
-            relief="flat"
+            highlightthickness=0,
+            relief="flat",
         )
         issue_vsb = ttk.Scrollbar(issue_container, orient="vertical", command=self.issue_listbox.yview)
         issue_hsb = ttk.Scrollbar(issue_container, orient="horizontal", command=self.issue_listbox.xview)
@@ -420,17 +636,24 @@ class 易码IDE:
         self.right_paned.add(editor_frame, stretch="always", minsize=400)
         
         # 输出区
-        output_frame = tk.Frame(self.right_paned, bg=self.theme_bg)
+        output_frame = tk.Frame(
+            self.right_paned,
+            bg=self.theme_bg,
+            highlightthickness=1,
+            highlightbackground=self.theme_toolbar_border,
+            highlightcolor=self.theme_toolbar_border,
+            bd=0,
+        )
         
         # 输出区顶栏
-        out_top = tk.Frame(output_frame, bg=self.theme_toolbar_bg)
+        out_top = tk.Frame(output_frame, bg=self.theme_panel_bg, padx=2, pady=1)
         out_top.pack(fill=tk.X)
         tk.Label(
             out_top,
             text="调试控制台（开发日志）",
             font=("Microsoft YaHei", 9, "bold"),
-            bg=self.theme_toolbar_bg,
-            fg="#FFFFFF",
+            bg=self.theme_panel_bg,
+            fg="#E7EDF7",
             anchor="w",
             padx=15,
             pady=4,
@@ -439,41 +662,38 @@ class 易码IDE:
             out_top,
             text="用于：运行日志 / 报错定位 / 打包进度（不是程序界面输出）",
             font=("Microsoft YaHei", 8),
-            bg=self.theme_toolbar_bg,
-            fg="#B8D7A3",
+            bg=self.theme_panel_bg,
+            fg="#9FB0C5",
             anchor="w",
             padx=8,
         ).pack(side=tk.LEFT)
-        清空按钮 = tk.Button(
+        清空按钮 = create_tool_btn(
             out_top,
             text="清空",
+            cmd=self._clear_output_console,
+            variant="subtle",
+            compact=True,
             font=("Microsoft YaHei", 8, "bold"),
-            command=self._clear_output_console,
-            bg="#3A3A3A",
-            fg="#CFCFCF",
-            activebackground="#4A4A4A",
-            activeforeground="#FFFFFF",
-            relief="flat",
-            overrelief="flat",
-            borderwidth=0,
-            highlightthickness=0,
-            takefocus=0,
-            cursor="hand2",
-            padx=10,
-            pady=2,
         )
         清空按钮.pack(side=tk.RIGHT, padx=(0, 8))
-        清空按钮.bind("<Enter>", lambda _e: 清空按钮.configure(bg="#4A4A4A", fg="#FFFFFF"))
-        清空按钮.bind("<Leave>", lambda _e: 清空按钮.configure(bg="#3A3A3A", fg="#CFCFCF"))
         
         terminal_font = ("Consolas" if sys.platform == "win32" else "Courier New", 11)
         self.output = scrolledtext.ScrolledText(output_frame, font=terminal_font, height=9, bg=self.theme_bg, fg="#A8C7FA", state=tk.DISABLED, padx=15, pady=5, spacing1=3, borderwidth=0, relief="flat", highlightthickness=0, insertbackground="#CCCCCC")
-        self.output.pack(fill=tk.BOTH, expand=True)
+        self.output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._style_scrolledtext_vbar(self.output, parent=output_frame)
         self.right_paned.add(output_frame, stretch="never", minsize=120)
         self._clear_output_console(keep_intro=True)
 
         # 底部状态栏（当前文件 / 语法诊断 / 光标位置）
-        status_bar = tk.Frame(self.root, bg=self.theme_toolbar_bg, height=int(26 * self.dpi_scale))
+        status_bar = tk.Frame(
+            self.root,
+            bg="#171C23",
+            height=int(28 * self.dpi_scale),
+            highlightthickness=1,
+            highlightbackground=self.theme_toolbar_border,
+            highlightcolor=self.theme_toolbar_border,
+            bd=0,
+        )
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         status_bar.pack_propagate(False)
 
@@ -485,18 +705,20 @@ class 易码IDE:
             status_bar,
             textvariable=self.status_main_var,
             font=self.font_ui,
-            bg=self.theme_toolbar_bg,
-            fg="#D4D4D4",
+            bg="#171C23",
+            fg="#D7E0EC",
             anchor="w",
             padx=10
         ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        tk.Frame(status_bar, width=1, bg=self.theme_toolbar_border).pack(side=tk.RIGHT, fill=tk.Y, pady=5)
 
         self.status_diag_label = tk.Label(
             status_bar,
             textvariable=self.status_diag_var,
             font=self.font_ui,
-            bg=self.theme_toolbar_bg,
-            fg="#C8E6C9",
+            bg="#171C23",
+            fg="#A9D6B3",
             anchor="e",
             padx=8
         )
@@ -504,12 +726,14 @@ class 易码IDE:
         self.status_diag_label.bind("<Button-1>", self.jump_to_diagnostic)
         self.status_diag_label.configure(cursor="hand2")
 
+        tk.Frame(status_bar, width=1, bg=self.theme_toolbar_border).pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+
         tk.Label(
             status_bar,
             textvariable=self.status_pos_var,
             font=self.font_ui,
-            bg=self.theme_toolbar_bg,
-            fg="#D4D4D4",
+            bg="#171C23",
+            fg="#D7E0EC",
             anchor="e",
             padx=10
         ).pack(side=tk.RIGHT)
@@ -3450,6 +3674,7 @@ class 易码IDE:
             highlightthickness=0
         )
         editor.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._style_scrolledtext_vbar(editor, parent=tab_frame)
 
         # 保证拖动滚动条、滚轮滚动、键盘滚动时行号始终同步
         def 同步纵向滚动(first, last):
