@@ -1,2 +1,22 @@
+ï»¿# Build outputs
+æ˜“ç _æˆå“è½¯ä»¶/
 
-Ò×Âë_³ÉÆ·Èí¼ş/
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Logs and temp artifacts
+*.log
+out.txt
+err.txt
+output.log
+output2.log
+output3.log
+
+# OS/editor
+.DS_Store
+Thumbs.db

@@ -4,11 +4,16 @@
 from .错误 import 名字找不到报错
 
 class 环境:
-    def __init__(self, 爸爸环境=None):
+    def __init__(self, 爸爸环境=None, 禁止向上赋值=False):
         self.记录本 = {}
         self.爸爸 = 爸爸环境
+        self.禁止向上赋值 = 禁止向上赋值
 
     def 记住(self, 名字, 值):
+        if self.禁止向上赋值:
+            self.记录本[名字] = 值
+            return
+
         # 如果在上级环境中存在这个名字，就优先修改上级的，保持状态更新（闭包）
         当前环境 = self
         while 当前环境 is not None:

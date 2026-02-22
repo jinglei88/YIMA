@@ -132,11 +132,11 @@ class 动态调用节点(AST节点):
         self.参数列表 = 参数列表
         self.行号 = 行号
 
-class 询问表达式节点(AST节点):
+class 输入表达式节点(AST节点):
     def __init__(self, 提示语句表达式):
         self.提示语句表达式 = 提示语句表达式
 
-class 交出语句节点(AST节点):
+class 返回语句节点(AST节点):
     def __init__(self, 表达式):
         self.表达式 = 表达式
 

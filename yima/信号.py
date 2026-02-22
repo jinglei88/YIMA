@@ -7,6 +7,6 @@ class 停下信号(Exception):
 class 略过信号(Exception):
     pass
 
-class 交出信号(Exception):
+class 返回信号(Exception):
     def __init__(self, 值):
         self.值 = 值

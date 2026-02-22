@@ -1,13 +1,127 @@
 # yima/解释器.py
 # 阅读并执行解析好的 AST（抽象语法树）
 
+import os
+
 from .语法树 import *
 from .环境 import 环境
 
 class 解释器:
-    def __init__(self):
+    def __init__(self, 严格局部作用域=False):
+        self.当前目录 = os.getcwd()
         self.全局环境 = 环境()
+        self.严格局部作用域 = 严格局部作用域
+        self._模块缓存 = {}
+        self._可选能力告警 = []
         self._植入内置函数()
+        self._内置名称集合 = set(self.全局环境.记录本.keys())
+
+    def 设置当前目录(self, 目录路径):
+        if 目录路径 and os.path.isdir(目录路径):
+            self.当前目录 = os.path.abspath(目录路径)
+
+    def _获取根环境(self, 环境上下文: 环境) -> 环境:
+        根环境 = 环境上下文
+        while 根环境.爸爸 is not None:
+            根环境 = 根环境.爸爸
+        return 根环境
+
+    def _模块搜索路径(self):
+        import sys
+
+        候选路径 = []
+        候选路径.extend([self.当前目录, os.path.join(self.当前目录, "示例")])
+
+        当前工作目录 = os.getcwd()
+        候选路径.extend([当前工作目录, os.path.join(当前工作目录, "示例")])
+
+        if hasattr(sys, "_MEIPASS"):
+            候选路径.insert(0, sys._MEIPASS)
+
+        结果 = []
+        for 路径 in 候选路径:
+            if 路径 and 路径 not in 结果:
+                结果.append(路径)
+        return 结果
+
+    def _定位易码模块文件(self, 模块名: str):
+        寻找路径 = 模块名
+        带后缀路径 = 寻找路径 if 寻找路径.endswith(".ym") else 寻找路径 + ".ym"
+
+        for 基础路径 in self._模块搜索路径():
+            候选列表 = [
+                os.path.join(基础路径, 带后缀路径),
+                os.path.join(基础路径, 寻找路径),
+            ]
+            for 候选 in 候选列表:
+                if os.path.isfile(候选):
+                    return os.path.abspath(候选)
+        return None
+
+    def _生成模块缓存键(self, 绝对路径: str, 根环境: 环境):
+        try:
+            修改时间 = os.stat(绝对路径).st_mtime_ns
+        except OSError:
+            修改时间 = 0
+        return (os.path.abspath(绝对路径), 修改时间, id(根环境))
+
+    def _加载易码模块(self, 绝对路径: str, 环境上下文: 环境):
+        根环境 = self._获取根环境(环境上下文)
+        缓存键 = self._生成模块缓存键(绝对路径, 根环境)
+        if 缓存键 in self._模块缓存:
+            return self._模块缓存[缓存键]
+
+        with open(绝对路径, 'r', encoding='utf-8') as f:
+            源码 = f.read()
+
+        from .词法分析 import 词法分析器
+        from .语法分析 import 语法分析器
+
+        模块Tokens = 词法分析器(源码).分析()
+        模块AST = 语法分析器(模块Tokens).解析()
+
+        模块环境 = 环境()
+        模块环境.记录本.update(根环境.记录本)
+
+        子解释器 = 解释器(严格局部作用域=self.严格局部作用域)
+        子解释器.全局环境 = 模块环境
+        子解释器._模块缓存 = self._模块缓存
+        子解释器.设置当前目录(os.path.dirname(绝对路径))
+        子解释器.执行代码(模块AST)
+
+        模块导出 = {}
+        for key, value in 模块环境.记录本.items():
+            if key not in 根环境.记录本:
+                模块导出[key] = value
+
+        缓存值 = {
+            "导出": 模块导出,
+            "全量": dict(模块环境.记录本),
+        }
+        self._模块缓存[缓存键] = 缓存值
+        return 缓存值
+
+    def _内置模块命名空间(self, 模块名: str, 环境上下文: 环境):
+        根环境 = self._获取根环境(环境上下文)
+        导出映射 = {
+            "文件管理": ["读文件", "写文件", "追加文件"],
+            "图形界面": ["建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面"],
+            "画板": [
+                "画布", "标题", "图标", "向前走", "向后走", "左转", "右转", "抬笔", "落笔", "画笔颜色",
+                "背景颜色", "去", "笔粗", "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画",
+                "刷新画面", "清除", "写字", "开始监听", "绑定按键", "计算距离", "当前X", "当前Y",
+            ],
+        }
+        if 模块名 == "魔法生态库":
+            名称列表 = sorted(self._内置名称集合)
+        else:
+            名称列表 = 导出映射.get(模块名, [])
+
+        命名空间 = {}
+        for 名称 in 名称列表:
+            if 名称 in 根环境.记录本:
+                命名空间[名称] = 根环境.记录本[名称]
+        return 命名空间
         
     def _植入内置函数(self):
         import random
@@ -23,7 +137,7 @@ class 解释器:
             return int(内容文字)
         
         def 转文字(内容):
-            return str(内容)
+            return self._转为白话文本(内容)
         
         # --- 列表/数组操作 ---
         def 新列表(*元素):
@@ -40,13 +154,17 @@ class 解释器:
             列表.insert(int(序号), 元素)
             return 列表
             
-        def 删除(列表, 序号):
-            return 列表.pop(int(序号))
+        def 删除(对象, 键或索引):
+            if isinstance(对象, dict):
+                return 对象.pop(键或索引, None)
+            else:
+                return 对象.pop(int(键或索引))
         
         self.全局环境.记住("取随机数", 获取随机数)
         self.全局环境.记住("转数字", 转数字)
         self.全局环境.记住("转文字", 转文字)
         self.全局环境.记住("新列表", 新列表)
+        self.全局环境.记住("排列", 新列表)  # 排列 是 新列表 的别名
         self.全局环境.记住("加入", 加入)
         self.全局环境.记住("插入", 插入)
         self.全局环境.记住("长度", 长度)
@@ -57,11 +175,11 @@ class 解释器:
             return list(字典.keys())
         def 所有值(字典):
             return list(字典.values())
-        def 有没有(集合, 元素):
+        def 存在(集合, 元素):
             return 元素 in 集合
         self.全局环境.记住("所有键", 所有键)
         self.全局环境.记住("所有值", 所有值)
-        self.全局环境.记住("有没有", 有没有)
+        self.全局环境.记住("存在", 存在)
         
         # --- 字符串操作 ---
         def 截取(文本, 起, 止):
@@ -142,14 +260,14 @@ class 解释器:
         # 尝试植入图形界面相关函数
         try:
             self._植入图形库()
-        except:
-            pass
+        except Exception as e:
+            self._可选能力告警.append(f"图形界面加载失败：{e}")
             
         # 尝试植入画板引擎 (Turtle)
         try:
             self._植入画图库()
-        except:
-            pass
+        except Exception as e:
+            self._可选能力告警.append(f"画板加载失败：{e}")
 
     def _植入图形库(self):
         import tkinter as tk
@@ -163,7 +281,8 @@ class 解释器:
             try:
                 from ctypes import windll
                 windll.shcore.SetProcessDpiAwareness(1)
-            except: pass
+            except Exception:
+                pass
             return 窗口
             
         def _加上文字(窗口, 内容):
@@ -189,7 +308,7 @@ class 解释器:
                     虚拟调用 = 函数调用节点(绑定的函数名, [], 行号=0)
                     self._做_函数调用节点(虚拟调用, self.全局环境)
                 except Exception as e:
-                    messagebox.showerror("按钮发神经了", f"找不到你指定的本事或者执行失败：{e}")
+                    messagebox.showerror("按钮执行失败", f"未找到目标函数或执行失败：{e}")
                     
             按钮 = tk.Button(窗口, text=文字, font=("Microsoft YaHei", 12), command=点击动作)
             按钮.pack(pady=5)
@@ -197,6 +316,11 @@ class 解释器:
             
         def _弹窗提醒(标题, 内容):
             messagebox.showinfo(标题, 内容)
+            
+        def _弹窗输入(标题, 提示=""):
+            from tkinter import simpledialog
+            结果 = simpledialog.askstring(标题, 提示)
+            return 结果 if 结果 is not None else ""
             
         def _展示窗口(窗口):
             窗口.mainloop()
@@ -208,6 +332,7 @@ class 解释器:
         self.全局环境.记住("改文字", _修改文字)
         self.全局环境.记住("加按钮", _加上按钮)
         self.全局环境.记住("弹窗", _弹窗提醒)
+        self.全局环境.记住("弹窗输入", _弹窗输入)
         self.全局环境.记住("打开界面", _展示窗口)
 
     def _植入画图库(self):
@@ -266,19 +391,19 @@ class 解释器:
         def 绑定按键(易码函数节点, 按键名):
             if not isinstance(易码函数节点, 定义函数节点):
                 from .错误 import 运行报错
-                raise 运行报错("绑定按键的第一个参数必须是一个功能（函数）名字哦。", 0)
+                raise 运行报错("绑定按键的第一个参数必须是功能名称。", 0)
                 
             解释器引用 = self
             旧实例环境 = getattr(self, '_当前实例环境', None)
             
             def 内部回调():
                 # 简单调用
-                函数环境 = 环境(爸爸环境=self.全局环境)
-                from .信号 import 交出信号
+                函数环境 = 环境(爸爸环境=self.全局环境, 禁止向上赋值=self.严格局部作用域)
+                from .信号 import 返回信号
                 for 语句 in 易码函数节点.代码块:
                     try:
                         解释器引用.执行(语句, 函数环境)
-                    except 交出信号:
+                    except 返回信号:
                         break
             
             turtle.onkey(内部回调, str(按键名))
@@ -293,18 +418,12 @@ class 解释器:
         self.全局环境.记住("标题", 标题)
         self.全局环境.记住("图标", 设置图标)
         self.全局环境.记住("向前走", 前进)
-        self.全局环境.记住("前", 前进)     # 别名
         self.全局环境.记住("向后走", 后退)
-        self.全局环境.记住("后", 后退)
         self.全局环境.记住("左转", 左转)
-        self.全局环境.记住("左", 左转)
         self.全局环境.记住("右转", 右转)
-        self.全局环境.记住("右", 右转)
-        self.全局环境.记住("抬走", 抬笔)
         self.全局环境.记住("抬笔", 抬笔)
         self.全局环境.记住("落笔", 落笔)
         self.全局环境.记住("画笔颜色", 画笔颜色)
-        self.全局环境.记住("换颜色", 画笔颜色) # 别名
         self.全局环境.记住("背景颜色", 背景颜色)
         self.全局环境.记住("去", 去到)
         self.全局环境.记住("笔粗", 粗细)
@@ -323,7 +442,7 @@ class 解释器:
         self.全局环境.记住("当前X", 获取X)
         self.全局环境.记住("当前Y", 获取Y)
 
-    def 执行代码(self, 程序树: 程序节点): # 后期在这里注册内置本事，比如 询问()
+    def 执行代码(self, 程序树: 程序节点):
         return self.执行(程序树)
 
     def 执行(self, 节点, 当前环境=None):
@@ -334,7 +453,7 @@ class 解释器:
         
         做点事 = getattr(self, 方法名, None)
         if 做点事 is None:
-            raise Exception(f"解释器还不知道怎么做【{类型名字}】哦 (开发中)")
+            raise Exception(f"解释器暂不支持节点类型【{类型名字}】。")
         try:
             return 做点事(节点, 环境上下文)
         except Exception as e:
@@ -349,10 +468,27 @@ class 解释器:
             结果 = self.执行(语句, 环境上下文)
         return 结果
 
+    def _转为白话文本(self, 值, 内部嵌套=False):
+        if type(值).__name__ == "空值" or 值 is None:
+            return "空"
+        if isinstance(值, bool):
+            return "对" if 值 else "错"
+        if isinstance(值, str):
+            if 内部嵌套:
+                return f'"{值}"'
+            return 值
+        if isinstance(值, list):
+            元素文本 = [self._转为白话文本(x, True) for x in 值]
+            return "[" + ", ".join(元素文本) + "]"
+        if isinstance(值, dict):
+            元素文本 = [f"{self._转为白话文本(k, True)}: {self._转为白话文本(v, True)}" for k, v in 值.items()]
+            return "{" + ", ".join(元素文本) + "}"
+        return str(值)
+
     def _做_显示语句节点(self, 节点: 显示语句节点, 环境上下文: 环境):
         值 = self.执行(节点.表达式, 环境上下文)
-        # 用 Python 原生 print 最终输出
-        print(值)
+        # 用白话文格式最终输出
+        print(self._转为白话文本(值))
         return 空值() # 暂时使用 Python 的 None 代替
 
     def _做_变量设定节点(self, 节点: 变量设定节点, 环境上下文: 环境):
@@ -395,7 +531,7 @@ class 解释器:
         次数 = self.执行(节点.次数表达式, 环境上下文)
         if type(次数) is not int:
             from .错误 import 运行报错
-            raise 运行报错(f"你要我重复的次数不是一个整数（现在是 {次数}），臣妾做不到啊！")
+            raise 运行报错(f"重复次数必须是整数，当前值为：{次数}")
         
         结果 = 空值()
         for i in range(次数):
@@ -419,7 +555,7 @@ class 解释器:
         try:
             迭代器 = iter(列表集)
         except TypeError:
-            raise 运行报错(f"你要我取出的东西【{列表集}】不是一个可以遍历的列表或文字哦。", 节点.列表表达式.行号 if hasattr(节点.列表表达式, '行号') else 0)
+            raise 运行报错(f"对象【{列表集}】不可遍历。", 节点.列表表达式.行号 if hasattr(节点.列表表达式, '行号') else 0)
             
         结果 = 空值()
         for 元素 in 迭代器:
@@ -434,15 +570,18 @@ class 解释器:
         return 结果
 
     def _做_尝试语句节点(self, 节点: 尝试语句节点, 环境上下文: 环境):
-         from .信号 import 停下信号, 略过信号, 交出信号
+         from .信号 import 停下信号, 略过信号, 返回信号
          结果 = 空值()
          try:
              for 语句 in 节点.尝试代码块:
                  结果 = self.执行(语句, 环境上下文)
-         except (停下信号, 略过信号, 交出信号):
+         except (停下信号, 略过信号, 返回信号):
              # 控制流信号不应该被 try..catch 拦截
              raise
          except Exception as e:
+             # 没写【如果出错】时，不应静默吞掉异常
+             if not 节点.出错代码块:
+                 raise
              # 捕获到了真正的运行时错误
              出错环境 = 环境(爸爸环境=环境上下文)
              if 节点.错误捕获名:
@@ -481,27 +620,27 @@ class 解释器:
         # 2. 普通易码函数
         if not hasattr(函数定义, '参数列表'):
             from .错误 import 运行报错
-            raise 运行报错(f"你叫我用【{节点.函数名}】这个本事，但这好像不是一个教过我的本事哦。", 节点.行号)
+            raise 运行报错(f"名称【{节点.函数名}】不是可调用函数。", 节点.行号)
             
         if len(节点.参数列表) != len(函数定义.参数列表):
             from .错误 import 运行报错
-            raise 运行报错(f"使用【{节点.函数名}】需要 {len(函数定义.参数列表)} 个材料，但你给了 {len(节点.参数列表)} 个哦。", 节点.行号)
+            raise 运行报错(f"函数【{节点.函数名}】需要 {len(函数定义.参数列表)} 个参数，实际传入 {len(节点.参数列表)} 个。", 节点.行号)
             
         传入的参数值 = []
         for 参数表达式 in 节点.参数列表:
             传入的参数值.append(self.执行(参数表达式, 环境上下文))
             
-        函数环境 = 环境(爸爸环境=环境上下文)
+        函数环境 = 环境(爸爸环境=环境上下文, 禁止向上赋值=self.严格局部作用域)
         
         for 名字, 值 in zip(函数定义.参数列表, 传入的参数值):
             函数环境.记住(名字, 值)
             
-        from .信号 import 交出信号
+        from .信号 import 返回信号
         结果 = 空值()
         for 语句 in 函数定义.代码块:
             try:
                 self.执行(语句, 函数环境)
-            except 交出信号 as 信号:
+            except 返回信号 as 信号:
                 return 信号.值
                 
         return 结果
@@ -520,170 +659,115 @@ class 解释器:
         # 2. 普通易码函数 (定义函数节点)
         if not hasattr(可调用对象, '参数列表'):
             from .错误 import 运行报错
-            raise 运行报错("你想要调用的这个东西并不是一个可以使用的本事（不能加括号调用）哦。", 节点.行号)
+            raise 运行报错("当前对象不可调用（不能使用括号）。", 节点.行号)
             
         if len(传入的参数值) != len(可调用对象.参数列表):
             from .错误 import 运行报错
-            raise 运行报错(f"这个本事需要 {len(可调用对象.参数列表)} 个材料，但你给了 {len(传入的参数值)} 个哦。", 节点.行号)
+            raise 运行报错(f"函数需要 {len(可调用对象.参数列表)} 个参数，实际传入 {len(传入的参数值)} 个。", 节点.行号)
             
-        函数环境 = 环境(爸爸环境=环境上下文)
+        函数环境 = 环境(爸爸环境=环境上下文, 禁止向上赋值=self.严格局部作用域)
         
         for 名字, 值 in zip(可调用对象.参数列表, 传入的参数值):
             函数环境.记住(名字, 值)
             
-        from .信号 import 交出信号
+        from .信号 import 返回信号
         结果 = 空值()
         for 语句 in 可调用对象.代码块:
             try:
                 self.执行(语句, 函数环境)
-            except 交出信号 as 信号:
+            except 返回信号 as 信号:
                 return 信号.值
                 
         return 结果
 
     def _做_引入语句节点(self, 节点: 引入语句节点, 环境上下文: 环境):
         import importlib
-        import os
-        import sys
-        from .错误 import 运行报错
+        from .错误 import 易码错误, 运行报错
         
         注册名 = 节点.别名 if 节点.别名 else 节点.模块名.split('/')[-1].split('.')[0]
         
         # ========== 第一优先级：内置虚拟模块（它们的函数已经在启动时注入全局环境了）==========
         内置模块集 = {"图形界面", "魔法生态库", "文件管理", "画板"}
         if 节点.模块名 in 内置模块集:
-            # 这些模块的函数已经在解释器初始化时通过 _植入图形库 / _植入画图库 等方法注册了
-            # 不需要做任何额外操作，直接跳过
+            if 节点.别名:
+                环境上下文.记住(注册名, self._内置模块命名空间(节点.模块名, 环境上下文))
             return 空值()
         
         # ========== 第二优先级：易码源文件模块（.ym 文件）==========
-        寻找路径 = 节点.模块名
-        带后缀路径 = 寻找路径 if 寻找路径.endswith(".ym") else 寻找路径 + ".ym"
-        
-        # 搜索路径列表
-        搜索集 = [os.getcwd(), os.path.join(os.getcwd(), "示例")]
-        if hasattr(sys, '_MEIPASS'):
-            搜索集.insert(0, sys._MEIPASS) # PyInstaller 打包环境优先
-            
-        绝对路径 = None
-        for 基础路径 in 搜索集:
-            候选 = os.path.join(基础路径, 带后缀路径)
-            if os.path.exists(候选):
-                绝对路径 = 候选
-                break
-            候选2 = os.path.join(基础路径, 寻找路径)
-            if os.path.exists(候选2):
-                绝对路径 = 候选2
-                break
+        绝对路径 = self._定位易码模块文件(节点.模块名)
                 
         if 绝对路径:
             try:
-                with open(绝对路径, 'r', encoding='utf-8') as f:
-                    源码 = f.read()
+                模块缓存项 = self._加载易码模块(绝对路径, 环境上下文)
+            except 易码错误:
+                raise
             except Exception as e:
-                raise 运行报错(f"读取模块文件失败：{e}", 节点.行号)
-                
-            from .词法分析 import 词法分析器
-            from .语法分析 import 语法分析器
-            
-            模块Tokens = 词法分析器(源码).分析()
-            模块AST = 语法分析器(模块Tokens).解析()
-            
-            # 创建模块环境（继承根环境的所有内置功能）
-            模块环境 = 环境()
-            根环境 = 环境上下文
-            while 根环境.爸爸 is not None:
-                根环境 = 根环境.爸爸
-            模块环境.记录本.update(根环境.记录本)
-            
-            # 独立执行模块代码
-            自己 = 解释器()
-            自己.全局环境 = 模块环境
-            自己.执行代码(模块AST)
-            
-            # 把模块里新定义的东西都注入当前环境（扁平导入，不做命名空间隔离）
-            for key, value in 模块环境.记录本.items():
-                if key not in 根环境.记录本:
-                    环境上下文.记住(key, value)
-                    
+                raise 运行报错(f"加载模块失败：{e}", 节点.行号)
+
+            环境上下文.记住(注册名, 模块缓存项["导出"])
             return 空值()
             
         # ========== 第三优先级：Python 原生库 ==========
         try:
             库模块 = importlib.import_module(节点.模块名)
         except ImportError:
-            raise 运行报错(f"你想借用的【{节点.模块名}】这个库我找不到呀，是不是名字拼错了？或者环境没有安装它。", 节点.行号)
+            raise 运行报错(f"找不到模块【{节点.模块名}】。请检查名称或安装状态。", 节点.行号)
             
         环境上下文.记住(注册名, 库模块)
         return 空值()
 
     def _做_精确引入语句节点(self, 节点: 精确引入语句节点, 环境上下文: 环境):
         import importlib
-        import os
-        from .错误 import 运行报错
+        from .错误 import 易码错误, 运行报错
         
         if 节点.模块名.endswith(".ym"):
-            寻找路径 = 节点.模块名
-            绝对路径 = os.path.join(os.getcwd(), 寻找路径)
-            if not os.path.exists(绝对路径):
-                绝对路径_备选 = os.path.join(os.getcwd(), "示例", 寻找路径)
-                if os.path.exists(绝对路径_备选):
-                    绝对路径 = 绝对路径_备选
-                else:
-                    raise 运行报错(f"找不到你要借用的易码源文件：{寻找路径}", 节点.行号)
-                    
+            绝对路径 = self._定位易码模块文件(节点.模块名)
+            if not 绝对路径:
+                raise 运行报错(f"找不到你要借用的易码源文件：{节点.模块名}", 节点.行号)
+
             try:
-                with open(绝对路径, 'r', encoding='utf-8') as f:
-                    源码 = f.read()
+                模块缓存项 = self._加载易码模块(绝对路径, 环境上下文)
+            except 易码错误:
+                raise
             except Exception as e:
-                raise 运行报错(f"读取模块文件失败：{e}", 节点.行号)
-                
-            from .词法分析 import 词法分析器
-            from .语法分析 import 语法分析器
-            
-            模块Tokens = 词法分析器(源码).分析()
-            模块AST = 语法分析器(模块Tokens).解析()
-            
-            模块环境 = 环境()
-            根环境 = 环境上下文
-            while 根环境.爸爸 is not None:
-                根环境 = 根环境.爸爸
-            模块环境.记录本.update(根环境.记录本)
-            
-            自己 = 解释器()
-            自己.全局环境 = 模块环境
-            自己.执行代码(模块AST)
-            
+                raise 运行报错(f"加载模块失败：{e}", 节点.行号)
+
+            模块全量符号 = 模块缓存项["全量"]
+
             # 从模块环境里捞出特定的功能
-            if 节点.功能名 in 模块环境.记录本:
-                环境上下文.记住(节点.功能名, 模块环境.记录本[节点.功能名])
+            if 节点.功能名 in 模块全量符号:
+                环境上下文.记住(节点.功能名, 模块全量符号[节点.功能名])
             else:
-                raise 运行报错(f"在【{节点.模块名}】里面找不到叫【{节点.功能名}】的这号人物/功能哦。", 节点.行号)
+                raise 运行报错(f"模块【{节点.模块名}】中不存在名称【{节点.功能名}】。", 节点.行号)
                 
         else:
             # 走 Python 原生库引入
             try:
                 库模块 = importlib.import_module(节点.模块名)
             except ImportError:
-                raise 运行报错(f"你想借用的【{节点.模块名}】这个库我找不到呀。", 节点.行号)
+                raise 运行报错(f"找不到模块【{节点.模块名}】。", 节点.行号)
                 
             if hasattr(库模块, 节点.功能名):
                 环境上下文.记住(节点.功能名, getattr(库模块, 节点.功能名))
             else:
-                raise 运行报错(f"在 Python 库【{节点.模块名}】里面没找到【{节点.功能名}】哦。", 节点.行号)
+                raise 运行报错(f"Python 模块【{节点.模块名}】中不存在名称【{节点.功能名}】。", 节点.行号)
                 
         return 空值()
 
     def _做_属性访问节点(self, 节点: 属性访问节点, 环境上下文: 环境):
         对象 = self.执行(节点.对象节点, 环境上下文)
         from .错误 import 运行报错
-        # 如果是字典，用键名取值
+        
+        # 如果是字典（比如导入的模块命名空间），用键名取值
         if isinstance(对象, dict):
             if 节点.属性名 in 对象:
                 return 对象[节点.属性名]
-            raise 运行报错(f"这个字典里没有【{节点.属性名}】这个键哦。", 节点.行号)
+            else:
+                raise 运行报错(f"模块或字典中不存在属性【{节点.属性名}】。", 节点.行号)
+                
+        # 普通对象的属性访问
         if not hasattr(对象, 节点.属性名):
-            raise 运行报错(f"这个东西身上没有【{节点.属性名}】这个属性或本事哦。", 节点.行号)
+            raise 运行报错(f"对象不包含属性或方法【{节点.属性名}】。", 节点.行号)
         return getattr(对象, 节点.属性名)
 
     def _做_属性设置节点(self, 节点: 属性设置节点, 环境上下文: 环境):
@@ -707,7 +791,7 @@ class 解释器:
         from .错误 import 运行报错
         图纸 = 环境上下文.告诉(节点.图纸名, 节点.行号)
         if not isinstance(图纸, 图纸定义节点):
-            raise 运行报错(f"【{节点.图纸名}】不是一个图纸哦，没法用制造来创建它。", 节点.行号)
+            raise 运行报错(f"名称【{节点.图纸名}】不是图纸定义，不能实例化。", 节点.行号)
         
         # 检查参数数量
         传入的参数值 = [self.执行(参, 环境上下文) for 参 in 节点.参数列表]
@@ -715,7 +799,7 @@ class 解释器:
             raise 运行报错(f"创建【{节点.图纸名}】需要 {len(图纸.参数列表)} 个材料，但你给了 {len(传入的参数值)} 个。", 节点.行号)
             
         # 创建实例环境
-        实例环境 = 环境(爸爸环境=环境上下文)
+        实例环境 = 环境(爸爸环境=环境上下文, 禁止向上赋值=self.严格局部作用域)
         for 名字, 值 in zip(图纸.参数列表, 传入的参数值):
             实例环境.记录本[名字] = 值
         
@@ -724,12 +808,12 @@ class 解释器:
         self._当前实例环境 = 实例环境
         
         # 执行图纸的代码块（构造逻辑）
-        from .信号 import 交出信号
+        from .信号 import 返回信号
         for 语句 in 图纸.代码块:
             try:
                 self.执行(语句, 实例环境)
-            except 交出信号:
-                pass  # 构造函数中的交出被忽略
+            except 返回信号:
+                pass  # 构造函数中的返回会被忽略
         
         # 恢复旧实例环境
         self._当前实例环境 = 旧实例环境
@@ -751,18 +835,18 @@ class 解释器:
                         def 绑定方法(*参数值):
                             if len(参数值) != len(原始函数.参数列表):
                                 from .错误 import 运行报错
-                                raise 运行报错(f"这个本事需要 {len(原始函数.参数列表)} 个材料，但你给了 {len(参数值)} 个。", 原始函数.行号)
-                            函数环境 = 环境(爸爸环境=绑定的实例环境)
+                                raise 运行报错(f"方法参数数量不匹配：需要 {len(原始函数.参数列表)} 个，实际传入 {len(参数值)} 个。", 原始函数.行号)
+                            函数环境 = 环境(爸爸环境=绑定的实例环境, 禁止向上赋值=self.严格局部作用域)
                             for 名字, 值 in zip(原始函数.参数列表, 参数值):
                                 函数环境.记录本[名字] = 值
                             旧实例环境 = getattr(解释器引用, '_当前实例环境', None)
                             解释器引用._当前实例环境 = 绑定的实例环境
-                            from .信号 import 交出信号
+                            from .信号 import 返回信号
                             结果 = None
                             for 语句 in 原始函数.代码块:
                                 try:
                                     解释器引用.执行(语句, 函数环境)
-                                except 交出信号 as 信号:
+                                except 返回信号 as 信号:
                                     解释器引用._当前实例环境 = 旧实例环境
                                     return 信号.值
                             解释器引用._当前实例环境 = 旧实例环境
@@ -781,16 +865,16 @@ class 解释器:
         from .错误 import 运行报错
         实例环境 = getattr(self, '_当前实例环境', None)
         if 实例环境 is None:
-            raise 运行报错("【它的】只能在图纸内部使用哦！", 节点.行号)
+            raise 运行报错("【它的】只能在图纸内部使用。", 节点.行号)
         if 节点.属性名 in 实例环境.记录本:
             return 实例环境.记录本[节点.属性名]
-        raise 运行报错(f"实例上没有【{节点.属性名}】这个属性哦。", 节点.行号)
+        raise 运行报错(f"实例上不存在属性【{节点.属性名}】。", 节点.行号)
 
     def _做_自身属性设置节点(self, 节点: 自身属性设置节点, 环境上下文: 环境):
         from .错误 import 运行报错
         实例环境 = getattr(self, '_当前实例环境', None)
         if 实例环境 is None:
-            raise 运行报错("【它的】只能在图纸内部使用哦！", 节点.行号)
+            raise 运行报错("【它的】只能在图纸内部使用。", 节点.行号)
         值 = self.执行(节点.值节点, 环境上下文)
         实例环境.记录本[节点.属性名] = 值
         return 值
@@ -810,7 +894,7 @@ class 解释器:
         操作数 = self.执行(节点.操作数, 环境上下文)
         操作符 = 节点.运算符.值
         
-        if 操作符 in ["取反", "反过来说", "!"]:
+        if 操作符 in ["取反", "!"]:
             return not 操作数
         if 操作符 == "-":
             return -操作数
@@ -827,9 +911,9 @@ class 解释器:
                 return 对象[索引]
             return 对象[int(索引)]
         except (IndexError, KeyError):
-            raise 运行报错(f"你想取的索引【{索引}】不存在或越界啦。", 节点.行号)
+            raise 运行报错(f"索引【{索引}】不存在或越界。", 节点.行号)
         except TypeError:
-            raise 运行报错(f"这个东西不支持用方括号取值哦。", 节点.行号)
+            raise 运行报错("该对象不支持方括号取值。", 节点.行号)
 
     def _做_索引设置节点(self, 节点, 环境上下文):
         对象 = self.执行(节点.对象节点, 环境上下文)
@@ -843,19 +927,19 @@ class 解释器:
                 对象[int(索引)] = 值
             return 值
         except (IndexError, KeyError):
-            raise 运行报错(f"你想设置的索引【{索引}】不存在或越界啦。", 节点.行号)
+            raise 运行报错(f"索引【{索引}】不存在或越界。", 节点.行号)
         except TypeError:
-            raise 运行报错(f"这个东西不支持用方括号设值哦。", 节点.行号)
+            raise 运行报错("该对象不支持方括号设值。", 节点.行号)
 
-    def _做_交出语句节点(self, 节点: 交出语句节点, 环境上下文: 环境):
-        from .信号 import 交出信号
+    def _做_返回语句节点(self, 节点: 返回语句节点, 环境上下文: 环境):
+        from .信号 import 返回信号
         if 节点.表达式 is None:
-            raise 交出信号(空值())
+            raise 返回信号(空值())
         else:
             返回值 = self.执行(节点.表达式, 环境上下文)
-            raise 交出信号(返回值)
+            raise 返回信号(返回值)
 
-    def _做_询问表达式节点(self, 节点: 询问表达式节点, 环境上下文: 环境):
+    def _做_输入表达式节点(self, 节点: 输入表达式节点, 环境上下文: 环境):
         提示文 = str(self.执行(节点.提示语句表达式, 环境上下文))
         try:
             return input(提示文)
@@ -867,6 +951,7 @@ class 解释器:
 
     def _做_模板字符串节点(self, 节点: 模板字符串节点, 环境上下文: 环境):
         import re
+        from .错误 import 名字找不到报错, 运行报错
         结果文本 = 节点.原始文本
         找出的变量 = re.findall(r'【([^】]+)】', 结果文本)
         for 变量名 in 找出的变量:
@@ -874,9 +959,8 @@ class 解释器:
             try:
                 值 = 环境上下文.告诉(变量名, 0)
                 结果文本 = 结果文本.replace(f"【{变量名}】", str(值))
-            except Exception:
-                from .错误 import 运行报错
-                raise 运行报错(f"你在文本里写了【{变量名}】，但我还没记住这个名字代表什么哦。", 0)
+            except 名字找不到报错:
+                raise 运行报错(f"模板变量【{变量名}】未定义。", 0)
         return 结果文本
 
     def _做_数字字面量节点(self, 节点: 数字字面量节点, 环境上下文: 环境):
@@ -902,14 +986,14 @@ class 解释器:
             
         右边值 = self.执行(节点.右边, 环境上下文)
         
-        from .错误 import 类型不匹配报错
+        from .错误 import 类型不匹配报错, 运行报错
         from .语法树 import 文本字面量节点
         # 拼接专门处理
         if 操作符 == "拼接":
-            return str(左边值) + str(右边值)
+            return self._转为白话文本(左边值) + self._转为白话文本(右边值)
         if 操作符 == "+":
             if isinstance(左边值, str) or isinstance(右边值, str):
-                return str(左边值) + str(右边值)
+                return self._转为白话文本(左边值) + self._转为白话文本(右边值)
             
         # 算术运算
         运算函数 = {
@@ -932,10 +1016,13 @@ class 解释器:
         if 操作符 in 运算函数:
             # 简单类型检查
             if not isinstance(左边值, (int, float)) or not isinstance(右边值, (int, float)):
-                raise 类型不匹配报错(f"你不能把【{type(左边值).__name__}】和【{type(右边值).__name__}】进行【{操作符}】操作哦。", 节点.行号)
-            if 操作符 == "除以" and 右边值 == 0:
-                raise 类型不匹配报错("除数不能是 0 哦！", 节点.行号)
-            return 运算函数[操作符](左边值, 右边值)
+                raise 类型不匹配报错(f"类型不匹配：{type(左边值).__name__} 与 {type(右边值).__name__} 不能执行【{操作符}】。", 节点.行号)
+            if 操作符 in ("除以", "/", "整除", "//", "取余", "%") and 右边值 == 0:
+                raise 运行报错("除数不能为 0。", 节点.行号)
+            try:
+                return 运算函数[操作符](左边值, 右边值)
+            except ZeroDivisionError:
+                raise 运行报错("除数不能为 0。", 节点.行号)
             
         # 比较运算
         比较函数 = {

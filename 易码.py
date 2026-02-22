@@ -1,5 +1,5 @@
 # 易码.py
-# 🇨🇳 易码大白话编程主入口
+# 易码命令行主入口
 
 import sys
 import os
@@ -9,49 +9,68 @@ from yima.词法分析 import 词法分析器
 from yima.语法分析 import 语法分析器
 from yima.解释器 import 解释器
 
-def 读文件并玩弄(文件路径):
+
+def 初始化终端编码():
+    """尽量避免 Windows 默认编码导致的输出异常。"""
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):
+        pass
+
+def 是否严格局部作用域():
+    值 = os.environ.get("YIMA_STRICT_SCOPE", "").strip().lower()
+    return 值 in ("1", "true", "yes", "on")
+
+def 执行文件(文件路径):
     try:
         with open(文件路径, 'r', encoding='utf-8') as f:
             代码 = f.read()
             
-        玩弄代码(代码, interactive=False)
+        return 执行源码(代码, interactive=False, 源码路径=文件路径)
         
     except FileNotFoundError:
-        print(f"❌ 找不到你说的文件：{文件路径}")
+        print(f"找不到文件：{文件路径}")
+        return False
     except Exception as e:
-        print(f"❌ 程序奔溃了：{e}")
+        print(f"执行失败：{e}")
+        return False
 
-def 玩弄代码(代码, interactive=True, shared_env=None):
+def 执行源码(代码, interactive=True, shared_env=None, 源码路径=None):
     try:
-        # 1. 切分为词
-        分析员 = 词法分析器(代码)
-        tokens = 分析员.分析()
+        分析器 = 词法分析器(代码)
+        tokens = 分析器.分析()
         
-        # 2. 组成句式树
-        管家 = 语法分析器(tokens)
-        树 = 管家.解析()
+        语法器 = 语法分析器(tokens)
+        语法树 = 语法器.解析()
         
-        # 3. 按照树行动
-        执行狗 = 解释器()
+        执行器 = 解释器(严格局部作用域=是否严格局部作用域())
+        if 源码路径:
+            执行器.设置当前目录(os.path.dirname(os.path.abspath(源码路径)))
         if shared_env:
-            执行狗.全局环境 = shared_env
-        结果 = 执行狗.执行(树)
+            执行器.全局环境 = shared_env
+        结果 = 执行器.执行(语法树)
         
         if interactive and 结果 is not None:
-            print(f"👉 {结果}")
+            print(结果)
+        return True
         
     except 易码错误 as e:
         print(e)
+        return False
     except Exception as e:
-        print(f"❌ 易码引擎故障了 (Bug)：{e}")
+        print(f"解释器内部错误：{e}")
+        return False
 
-def 启动聊天模式():
+def 启动交互模式():
     print("========================================")
-    print("🌟 欢迎来到 易码大白话 编程世界 🌟")
-    print("输入代码即可运行，输入 '退出' 结束")
+    print("欢迎使用 易码 交互模式")
+    print("输入代码后回车执行，输入“退出”结束")
     print("========================================\n")
     
-    环境上下文 = 解释器().全局环境
+    环境上下文 = 解释器(严格局部作用域=是否严格局部作用域()).全局环境
     
     while True:
         try:
@@ -59,22 +78,27 @@ def 启动聊天模式():
             if not 代码.strip():
                 continue
             if 代码.strip() in ['退出', 'quit', 'exit']:
-                print("拜拜！")
+                print("已退出。")
                 break
                 
-            玩弄代码(代码, interactive=True, shared_env=环境上下文)
+            执行源码(代码, interactive=True, shared_env=环境上下文)
             
         except KeyboardInterrupt:
-            print("\n拜拜！")
+            print("\n已退出。")
             break
         except EOFError:
             break
 
+# 兼容旧接口（后续版本将移除）
+玩弄代码 = 执行源码
+读文件并玩弄 = 执行文件
+启动聊天模式 = 启动交互模式
+
 if __name__ == "__main__":
+    初始化终端编码()
     if len(sys.argv) > 1:
-        # 如果带了参数，第一参数就是文件名
-        执行文件 = sys.argv[1]
-        读文件并玩弄(执行文件)
+        目标文件 = sys.argv[1]
+        成功 = 执行文件(目标文件)
+        sys.exit(0 if 成功 else 1)
     else:
-        # 不带参数进入互动模式
-        启动聊天模式()
+        启动交互模式()
