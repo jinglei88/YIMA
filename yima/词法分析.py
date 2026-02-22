@@ -1,3 +1,15 @@
+﻿#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
+
 # yima/词法分析.py
 # 易码词法分析器（官方关键词版）
 
@@ -427,4 +439,5 @@ class 词法分析器:
         精简Tokens.append(eof_token)
         
         return 精简Tokens
+
 

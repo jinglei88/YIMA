@@ -1,3 +1,15 @@
+﻿#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
+
 # yima/语法分析.py
 # 易码语法分析器 - 通过中文句式生成 AST
 
@@ -635,3 +647,4 @@ class 语法分析器:
                 break
                 
         return primary
+

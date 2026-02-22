@@ -1,10 +1,29 @@
 # yima/解释器.py
 # 阅读并执行解析好的 AST（抽象语法树）
 
+#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
 import os
 
 from .语法树 import *
 from .环境 import 环境
+
+class 易码函数:
+    def __init__(self, 定义节点: 定义函数节点, 定义环境: 环境):
+        self.函数名 = 定义节点.函数名
+        self.参数列表 = list(定义节点.参数列表)
+        self.代码块 = 定义节点.代码块
+        self.行号 = getattr(定义节点, "行号", 0)
+        self.定义环境 = 定义环境
 
 class 解释器:
     def __init__(self, 严格局部作用域=False):
@@ -105,7 +124,10 @@ class 解释器:
         根环境 = self._获取根环境(环境上下文)
         导出映射 = {
             "文件管理": ["读文件", "写文件", "追加文件"],
-            "图形界面": ["建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面"],
+            "图形界面": [
+                "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面",
+                "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
+            ],
             "画板": [
                 "画布", "标题", "图标", "向前走", "向后走", "左转", "右转", "抬笔", "落笔", "画笔颜色",
                 "背景颜色", "去", "笔粗", "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画",
@@ -165,6 +187,7 @@ class 解释器:
         self.全局环境.记住("转文字", 转文字)
         self.全局环境.记住("新列表", 新列表)
         self.全局环境.记住("排列", 新列表)  # 排列 是 新列表 的别名
+        self.全局环境.记住("是一份清单", 新列表)  # 兼容旧写法
         self.全局环境.记住("加入", 加入)
         self.全局环境.记住("插入", 插入)
         self.全局环境.记住("长度", 长度)
@@ -271,7 +294,8 @@ class 解释器:
 
     def _植入图形库(self):
         import tkinter as tk
-        from tkinter import messagebox
+        from tkinter import messagebox, ttk
+        from tkinter import font as tkfont
         
         def _创建窗口(标题="易码程序", 宽=400, 高=300):
             窗口 = tk.Tk()
@@ -324,6 +348,162 @@ class 解释器:
             
         def _展示窗口(窗口):
             窗口.mainloop()
+
+        def _规范列名(列定义):
+            if isinstance(列定义, (list, tuple)):
+                列名 = [str(列).strip() for 列 in 列定义 if str(列).strip()]
+            else:
+                文本 = str(列定义).strip()
+                if not 文本:
+                    列名 = []
+                else:
+                    分隔符 = None
+                    for 候选 in [",", "，", "|", "｜", ";", "；"]:
+                        if 候选 in 文本:
+                            分隔符 = 候选
+                            break
+                    if 分隔符:
+                        列名 = [片段.strip() for 片段 in 文本.split(分隔符) if 片段.strip()]
+                    else:
+                        列名 = [文本]
+
+            if not 列名:
+                列名 = ["列1", "列2"]
+            return 列名
+
+        def _定位表格项(表格, 序号或项):
+            子项 = list(表格.get_children())
+            if not 子项:
+                return None
+
+            if isinstance(序号或项, (int, float)):
+                索引 = int(序号或项)
+                if 0 <= 索引 < len(子项):
+                    return 子项[索引]
+                return None
+
+            if 序号或项 is None:
+                选中 = 表格.selection()
+                return 选中[0] if 选中 else None
+
+            文本参数 = str(序号或项).strip()
+            if not 文本参数:
+                选中 = 表格.selection()
+                return 选中[0] if 选中 else None
+
+            if 文本参数 in 子项:
+                return 文本参数
+
+            if 文本参数.lstrip("-").isdigit():
+                索引 = int(文本参数)
+                if 0 <= 索引 < len(子项):
+                    return 子项[索引]
+            return None
+
+        def _规范表格行(表格, 行数据):
+            列名 = list(getattr(表格, "_易码列名", []))
+            列数 = len(列名)
+
+            if isinstance(行数据, dict):
+                值 = [self._转为白话文本(行数据.get(列, "")) for 列 in 列名]
+            elif isinstance(行数据, (list, tuple)):
+                值 = [self._转为白话文本(元素) for 元素 in 行数据]
+            else:
+                值 = [self._转为白话文本(行数据)]
+
+            if 列数 <= 0:
+                return 值
+            if len(值) < 列数:
+                值.extend([""] * (列数 - len(值)))
+            if len(值) > 列数:
+                值 = 值[:列数]
+            return 值
+
+        def _加上表格(窗口, 列定义, 高度=10):
+            列名 = _规范列名(列定义)
+            高度值 = max(3, int(高度))
+
+            # 为表格单独设置字体和行高，避免中文在高 DPI 下被裁切
+            # Tk 会自己处理系统缩放，这里不要再乘 DPI，避免行距被放大两次
+            字号 = 11
+            内容字体 = tkfont.Font(family="Microsoft YaHei", size=字号)
+            表头字体 = tkfont.Font(family="Microsoft YaHei", size=字号, weight="bold")
+            文字行高 = 内容字体.metrics("linespace")
+            行高 = max(24, min(34, 文字行高 + 6))
+
+            样式 = ttk.Style(窗口)
+            样式名 = f"Yima{id(窗口)}.Treeview"
+            样式.configure(样式名, font=内容字体, rowheight=行高)
+            样式.configure(f"{样式名}.Heading", font=表头字体)
+
+            容器 = tk.Frame(窗口)
+            容器.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+
+            表格 = ttk.Treeview(容器, columns=列名, show="headings", selectmode="browse", height=高度值, style=样式名)
+            for 列 in 列名:
+                表格.heading(列, text=列)
+                建议宽度 = max(90, min(260, 30 + len(str(列)) * 24))
+                表格.column(列, anchor="w", stretch=True, width=建议宽度)
+
+            纵向滚动条 = ttk.Scrollbar(容器, orient="vertical", command=表格.yview)
+            横向滚动条 = ttk.Scrollbar(容器, orient="horizontal", command=表格.xview)
+            表格.configure(yscrollcommand=纵向滚动条.set, xscrollcommand=横向滚动条.set)
+
+            表格.grid(row=0, column=0, sticky="nsew")
+            纵向滚动条.grid(row=0, column=1, sticky="ns")
+            横向滚动条.grid(row=1, column=0, sticky="ew")
+            容器.grid_rowconfigure(0, weight=1)
+            容器.grid_columnconfigure(0, weight=1)
+
+            表格._易码列名 = 列名
+            表格._易码内容字体 = 内容字体
+            表格._易码表头字体 = 表头字体
+            return 表格
+
+        def _表格加行(表格, 行数据):
+            值 = _规范表格行(表格, 行数据)
+            return 表格.insert("", "end", values=值)
+
+        def _表格清空(表格):
+            for 项 in 表格.get_children():
+                表格.delete(项)
+
+        def _表格所有行(表格):
+            结果 = []
+            for 项 in 表格.get_children():
+                结果.append(list(表格.item(项, "values")))
+            return 结果
+
+        def _表格选中行(表格):
+            选中 = 表格.selection()
+            if not 选中:
+                return None
+            return list(表格.item(选中[0], "values"))
+
+        def _表格选中序号(表格):
+            选中 = 表格.selection()
+            if not 选中:
+                return -1
+            子项 = list(表格.get_children())
+            try:
+                return 子项.index(选中[0])
+            except ValueError:
+                return -1
+
+        def _表格删行(表格, 序号或项=""):
+            目标项 = _定位表格项(表格, 序号或项)
+            if not 目标项:
+                return False
+            表格.delete(目标项)
+            return True
+
+        def _表格改行(表格, 序号或项, 行数据):
+            目标项 = _定位表格项(表格, 序号或项)
+            if not 目标项:
+                return False
+            值 = _规范表格行(表格, 行数据)
+            表格.item(目标项, values=值)
+            return True
             
         self.全局环境.记住("建窗口", _创建窗口)
         self.全局环境.记住("加文字", _加上文字)
@@ -334,6 +514,14 @@ class 解释器:
         self.全局环境.记住("弹窗", _弹窗提醒)
         self.全局环境.记住("弹窗输入", _弹窗输入)
         self.全局环境.记住("打开界面", _展示窗口)
+        self.全局环境.记住("加表格", _加上表格)
+        self.全局环境.记住("表格加行", _表格加行)
+        self.全局环境.记住("表格清空", _表格清空)
+        self.全局环境.记住("表格所有行", _表格所有行)
+        self.全局环境.记住("表格选中行", _表格选中行)
+        self.全局环境.记住("表格选中序号", _表格选中序号)
+        self.全局环境.记住("表格删行", _表格删行)
+        self.全局环境.记住("表格改行", _表格改行)
 
     def _植入画图库(self):
         import turtle
@@ -471,6 +659,10 @@ class 解释器:
     def _转为白话文本(self, 值, 内部嵌套=False):
         if type(值).__name__ == "空值" or 值 is None:
             return "空"
+        if isinstance(值, 易码函数):
+            return f"<功能 {值.函数名}>"
+        if isinstance(值, 定义函数节点):
+            return f"<功能 {值.函数名}>"
         if isinstance(值, bool):
             return "对" if 值 else "错"
         if isinstance(值, str):
@@ -604,8 +796,38 @@ class 解释器:
         raise 略过信号()
 
     def _做_定义函数节点(self, 节点: 定义函数节点, 环境上下文: 环境):
-        环境上下文.记住(节点.函数名, 节点)
+        环境上下文.记住(节点.函数名, 易码函数(节点, 环境上下文))
         return 空值()
+
+    def _转成易码函数对象(self, 候选对象, 回退定义环境: 环境):
+        if isinstance(候选对象, 易码函数):
+            return 候选对象
+        if isinstance(候选对象, 定义函数节点):
+            定义环境 = getattr(候选对象, "_定义环境", 回退定义环境)
+            return 易码函数(候选对象, 定义环境)
+        return None
+
+    def _执行易码函数对象(self, 函数对象: 易码函数, 参数值列表, 调用行号=0):
+        from .错误 import 运行报错
+        if len(参数值列表) != len(函数对象.参数列表):
+            raise 运行报错(
+                f"函数【{函数对象.函数名}】需要 {len(函数对象.参数列表)} 个参数，实际传入 {len(参数值列表)} 个。",
+                调用行号,
+            )
+
+        定义环境 = 函数对象.定义环境 if 函数对象.定义环境 else self.全局环境
+        函数环境 = 环境(爸爸环境=定义环境, 禁止向上赋值=self.严格局部作用域)
+        for 名字, 值 in zip(函数对象.参数列表, 参数值列表):
+            函数环境.记录本[名字] = 值
+
+        from .信号 import 返回信号
+        结果 = 空值()
+        for 语句 in 函数对象.代码块:
+            try:
+                self.执行(语句, 函数环境)
+            except 返回信号 as 信号:
+                return 信号.值
+        return 结果
 
     def _做_函数调用节点(self, 节点: 函数调用节点, 环境上下文: 环境):
         函数定义 = 环境上下文.告诉(节点.函数名, 节点.行号)
@@ -618,32 +840,15 @@ class 解释器:
             return 函数定义(*传入的参数值)
             
         # 2. 普通易码函数
-        if not hasattr(函数定义, '参数列表'):
+        函数对象 = self._转成易码函数对象(函数定义, 环境上下文)
+        if not 函数对象:
             from .错误 import 运行报错
             raise 运行报错(f"名称【{节点.函数名}】不是可调用函数。", 节点.行号)
-            
-        if len(节点.参数列表) != len(函数定义.参数列表):
-            from .错误 import 运行报错
-            raise 运行报错(f"函数【{节点.函数名}】需要 {len(函数定义.参数列表)} 个参数，实际传入 {len(节点.参数列表)} 个。", 节点.行号)
             
         传入的参数值 = []
         for 参数表达式 in 节点.参数列表:
             传入的参数值.append(self.执行(参数表达式, 环境上下文))
-            
-        函数环境 = 环境(爸爸环境=环境上下文, 禁止向上赋值=self.严格局部作用域)
-        
-        for 名字, 值 in zip(函数定义.参数列表, 传入的参数值):
-            函数环境.记住(名字, 值)
-            
-        from .信号 import 返回信号
-        结果 = 空值()
-        for 语句 in 函数定义.代码块:
-            try:
-                self.执行(语句, 函数环境)
-            except 返回信号 as 信号:
-                return 信号.值
-                
-        return 结果
+        return self._执行易码函数对象(函数对象, 传入的参数值, 节点.行号)
 
     def _做_动态调用节点(self, 节点: 动态调用节点, 环境上下文: 环境):
         可调用对象 = self.执行(节点.目标节点, 环境上下文)
@@ -657,28 +862,11 @@ class 解释器:
             return 可调用对象(*传入的参数值)
             
         # 2. 普通易码函数 (定义函数节点)
-        if not hasattr(可调用对象, '参数列表'):
+        函数对象 = self._转成易码函数对象(可调用对象, 环境上下文)
+        if not 函数对象:
             from .错误 import 运行报错
             raise 运行报错("当前对象不可调用（不能使用括号）。", 节点.行号)
-            
-        if len(传入的参数值) != len(可调用对象.参数列表):
-            from .错误 import 运行报错
-            raise 运行报错(f"函数需要 {len(可调用对象.参数列表)} 个参数，实际传入 {len(传入的参数值)} 个。", 节点.行号)
-            
-        函数环境 = 环境(爸爸环境=环境上下文, 禁止向上赋值=self.严格局部作用域)
-        
-        for 名字, 值 in zip(可调用对象.参数列表, 传入的参数值):
-            函数环境.记住(名字, 值)
-            
-        from .信号 import 返回信号
-        结果 = 空值()
-        for 语句 in 可调用对象.代码块:
-            try:
-                self.执行(语句, 函数环境)
-            except 返回信号 as 信号:
-                return 信号.值
-                
-        return 结果
+        return self._执行易码函数对象(函数对象, 传入的参数值, 节点.行号)
 
     def _做_引入语句节点(self, 节点: 引入语句节点, 环境上下文: 环境):
         import importlib
@@ -720,11 +908,8 @@ class 解释器:
         import importlib
         from .错误 import 易码错误, 运行报错
         
-        if 节点.模块名.endswith(".ym"):
-            绝对路径 = self._定位易码模块文件(节点.模块名)
-            if not 绝对路径:
-                raise 运行报错(f"找不到你要借用的易码源文件：{节点.模块名}", 节点.行号)
-
+        绝对路径 = self._定位易码模块文件(节点.模块名)
+        if 绝对路径:
             try:
                 模块缓存项 = self._加载易码模块(绝对路径, 环境上下文)
             except 易码错误:
@@ -828,9 +1013,9 @@ class 解释器:
                 记录本 = self._实例环境.记录本
                 if name in 记录本:
                     value = 记录本[name]
-                    if isinstance(value, 定义函数节点):
+                    if isinstance(value, 易码函数) or isinstance(value, 定义函数节点):
                         # 动态生成绑定方法
-                        原始函数 = value
+                        原始函数 = value if isinstance(value, 易码函数) else 易码函数(value, self._实例环境)
                         绑定的实例环境 = self._实例环境
                         def 绑定方法(*参数值):
                             if len(参数值) != len(原始函数.参数列表):
@@ -952,15 +1137,24 @@ class 解释器:
     def _做_模板字符串节点(self, 节点: 模板字符串节点, 环境上下文: 环境):
         import re
         from .错误 import 名字找不到报错, 运行报错
+        左括号占位 = "\uFFF0"
+        右括号占位 = "\uFFF1"
+
         结果文本 = 节点.原始文本
+        # 允许字面量输出【】：支持【【文本】】与 \【文本\】 两种写法
+        结果文本 = 结果文本.replace("【【", 左括号占位).replace("】】", 右括号占位)
+        结果文本 = 结果文本.replace("\\【", 左括号占位).replace("\\】", 右括号占位)
+
         找出的变量 = re.findall(r'【([^】]+)】', 结果文本)
         for 变量名 in 找出的变量:
             变量名 = 变量名.strip()
             try:
                 值 = 环境上下文.告诉(变量名, 0)
-                结果文本 = 结果文本.replace(f"【{变量名}】", str(值))
+                结果文本 = 结果文本.replace(f"【{变量名}】", self._转为白话文本(值))
             except 名字找不到报错:
                 raise 运行报错(f"模板变量【{变量名}】未定义。", 0)
+
+        结果文本 = 结果文本.replace(左括号占位, "【").replace(右括号占位, "】")
         return 结果文本
 
     def _做_数字字面量节点(self, 节点: 数字字面量节点, 环境上下文: 环境):

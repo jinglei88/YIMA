@@ -1,3 +1,15 @@
+﻿#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
+
 # yima/错误.py
 # 易码错误系统（专业中文）
 
@@ -80,3 +92,4 @@ class 名字找不到报错(运行报错):
 class 类型不匹配报错(运行报错):
     def __init__(self, 消息, 行号=None, 列号=None, 建议=None):
         super().__init__(消息, 行号, 列号, 建议)
+

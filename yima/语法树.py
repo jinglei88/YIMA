@@ -1,3 +1,15 @@
+﻿#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
+
 # yima/语法树.py
 # 易码大白话 AST 节点定义
 
@@ -191,3 +203,4 @@ class 自身属性设置节点(AST节点):
         self.属性名 = 属性名
         self.值节点 = 值节点
         self.行号 = 行号
+

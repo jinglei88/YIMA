@@ -1,7 +1,19 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """易码错误体验回归脚本（高频错误场景）。"""
 
 from __future__ import annotations
+
+#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
 
 import locale
 import subprocess
@@ -100,3 +112,4 @@ if __name__ == "__main__":
         safe = str(e).encode("unicode_escape", errors="replace").decode("ascii", errors="replace")
         print(f"[FAIL] 错误体验回归失败: {safe}")
         raise SystemExit(1)
+

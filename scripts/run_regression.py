@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """易码最小回归脚本。
 
 用途：
@@ -8,6 +8,18 @@
 """
 
 from __future__ import annotations
+
+#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
 
 import os
 import locale
@@ -103,6 +115,45 @@ def semantic_check() -> None:
         assert_contains(out, "2", "模块缓存结果")
     print("[OK] 模块缓存语义通过")
 
+    with tempfile.TemporaryDirectory(dir=ROOT) as td:
+        tdir = Path(td)
+        mod = tdir / "_scope_mod.ym"
+        main = tdir / "_scope_main.ym"
+        mod.write_text(
+            "计数 = 0\n"
+            "功能 增加一次()\n"
+            "    计数 = 计数 + 1\n"
+            "功能 当前计数()\n"
+            "    返回 计数\n",
+            encoding="utf-8",
+        )
+        main.write_text(
+            '引入 "_scope_mod" 叫做 库\n'
+            "库.增加一次()\n"
+            "库.增加一次()\n"
+            '用 "_scope_mod" 中的 当前计数\n'
+            "显示 当前计数()\n",
+            encoding="utf-8",
+        )
+
+        out = run_cmd([PY, "易码.py", str(main)])
+        assert_contains(out, "2", "模块函数作用域与精确引入")
+    print("[OK] 模块函数作用域与精确引入通过")
+
+    out = run_cmd(
+        [
+            PY,
+            "-c",
+            (
+                "from 易码 import 执行源码; "
+                "执行源码('功能 继续探索()\\n    返回 \"ok\"\\n显示 \"按钮：【【继续探索】】\"\\n显示 \"按钮2：\\\\【继续探索\\\\】\"', interactive=False)"
+            ),
+        ]
+    )
+    assert_contains(out, "按钮：【继续探索】", "模板字面量转义")
+    assert_contains(out, "按钮2：【继续探索】", "模板字面量反斜杠转义")
+    print("[OK] 模板字面量转义通过")
+
 
 def error_regression_check() -> None:
     out = run_cmd([PY, "scripts/run_error_regression.py"])
@@ -127,3 +178,4 @@ if __name__ == "__main__":
         safe = str(e).encode("unicode_escape", errors="replace").decode("ascii", errors="replace")
         print(f"[FAIL] 回归失败: {safe}")
         raise SystemExit(1)
+

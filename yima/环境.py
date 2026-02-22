@@ -1,3 +1,15 @@
+﻿#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
+
 # yima/环境.py
 # 记录所有的名字和它们对应的值
 
@@ -33,3 +45,4 @@ class 环境:
             return self.爸爸.告诉(名字, 行号)
             
         raise 名字找不到报错(名字, 行号)
+

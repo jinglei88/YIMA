@@ -1,3 +1,14 @@
+#
+# Ownership Marker (Open Source Prep)
+# Author: 景磊 (Jing Lei)
+# Copyright (c) 2026 景磊
+# Project: 易码 / Yima
+# Marker-ID: YIMA-JINGLEI-CORE
+
+__author__ = "景磊"
+__copyright__ = "Copyright (c) 2026 景磊"
+__marker_id__ = "YIMA-JINGLEI-CORE"
+
 import os
 import sys
 import subprocess
@@ -7,8 +18,8 @@ def 显示帮助():
     print("===================================")
     print("         易码 官方打包器            ")
     print("===================================")
-    print("用法: python 易码打包工具.py <你的源码.ym> [可选的图标.ico]")
-    print("例如: python 易码打包工具.py 示例/勇者大冒险.ym 游戏图标.ico")
+    print("用法: python 易码打包工具.py <你的源码.ym> [可选的图标.ico] [可选的软件名]")
+    print("例如: python 易码打包工具.py 示例/勇者大冒险.ym 游戏图标.ico 我的勇者传说")
     print("会在当前目录生成可直接运行的 .exe 文件。")
 
 def 命令转文本(参数列表):
@@ -21,15 +32,30 @@ def 命令转文本(参数列表):
     except Exception:
         return " ".join(str(x) for x in 参数列表)
 
-def 编译并打包(源码路径, 图标路径=None, 隐藏黑框=False, 进度打字机=print):
+def 清理软件名(名称, 默认值="易码生成软件"):
+    名称文本 = str(名称 or "").strip()
+    if not 名称文本:
+        名称文本 = 默认值
+    for 坏字符 in '<>:"/\\|?*\n\r\t':
+        名称文本 = 名称文本.replace(坏字符, "_")
+    名称文本 = 名称文本.strip(" .")
+    if not 名称文本:
+        名称文本 = 默认值
+    系统保留名 = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+    if 名称文本.upper() in 系统保留名:
+        名称文本 = f"{名称文本}_app"
+    return 名称文本
+
+def 编译并打包(源码路径, 图标路径=None, 隐藏黑框=False, 进度打字机=print, 软件名称=None):
     if not os.path.exists(源码路径):
         raise FileNotFoundError(f"找不到文件：{源码路径}")
 
     绝对源码路径 = os.path.abspath(源码路径)
     文件名 = os.path.basename(源码路径)
-    应用名, ext = os.path.splitext(文件名)
-    if 应用名.startswith("_易码源码编译缓冲"):
-        应用名 = "易码生成软件"
+    默认应用名, ext = os.path.splitext(文件名)
+    if 默认应用名.startswith("_易码源码编译缓冲"):
+        默认应用名 = "易码生成软件"
+    应用名 = 清理软件名(软件名称, 默认值=默认应用名)
 
     如果你有图标 = 图标路径
     当前目录 = os.path.abspath(os.getcwd())
@@ -184,8 +210,9 @@ def 主程序():
         sys.exit(0)
     源码路径 = sys.argv[1]
     图标路径 = sys.argv[2] if len(sys.argv) > 2 else None
+    软件名称 = sys.argv[3] if len(sys.argv) > 3 else None
     try:
-        编译并打包(源码路径, 图标路径)
+        编译并打包(源码路径, 图标路径, 软件名称=软件名称)
     except Exception as e:
         print(f"❌ 发生错误: {e}")
         sys.exit(1)
