@@ -124,6 +124,10 @@ class 解释器:
         根环境 = self._获取根环境(环境上下文)
         导出映射 = {
             "文件管理": ["读文件", "写文件", "追加文件"],
+            "系统工具": ["文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录", "拼路径", "绝对路径", "当前目录"],
+            "数据工具": ["解析JSON", "生成JSON", "读JSON", "写JSON"],
+            "网络请求": ["发起请求", "发GET", "发POST", "发GET_JSON", "发POST_JSON", "读响应JSON"],
+            "本地数据库": ["打开数据库", "执行SQL", "查询SQL", "关闭数据库", "开始事务", "提交事务", "回滚事务"],
             "图形界面": [
                 "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面",
                 "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
@@ -237,6 +241,231 @@ class 解释器:
         self.全局环境.记住("读文件", 读文件)
         self.全局环境.记住("写文件", 写文件)
         self.全局环境.记住("追加文件", 追加文件)
+
+        # --- 路径与目录 ---
+        def 文件存在(路径):
+            return os.path.isfile(str(路径))
+        def 目录存在(路径):
+            return os.path.isdir(str(路径))
+        def 创建目录(路径):
+            路径文本 = str(路径).strip()
+            if not 路径文本:
+                return ""
+            os.makedirs(路径文本, exist_ok=True)
+            return os.path.abspath(路径文本)
+        def 列出目录(路径="."):
+            路径文本 = str(路径) if 路径 is not None else "."
+            if not os.path.isdir(路径文本):
+                return []
+            return sorted(os.listdir(路径文本))
+        def 删除文件(路径):
+            路径文本 = str(路径)
+            if not os.path.isfile(路径文本):
+                return False
+            os.remove(路径文本)
+            return True
+        def 删除目录(路径):
+            import shutil
+            路径文本 = str(路径)
+            if not os.path.isdir(路径文本):
+                return False
+            shutil.rmtree(路径文本)
+            return True
+        def 拼路径(*片段):
+            return os.path.join(*(str(片) for 片 in 片段))
+        def 绝对路径(路径):
+            return os.path.abspath(str(路径))
+        def 当前目录():
+            return os.getcwd()
+        self.全局环境.记住("文件存在", 文件存在)
+        self.全局环境.记住("目录存在", 目录存在)
+        self.全局环境.记住("创建目录", 创建目录)
+        self.全局环境.记住("列出目录", 列出目录)
+        self.全局环境.记住("删除文件", 删除文件)
+        self.全局环境.记住("删除目录", 删除目录)
+        self.全局环境.记住("拼路径", 拼路径)
+        self.全局环境.记住("绝对路径", 绝对路径)
+        self.全局环境.记住("当前目录", 当前目录)
+
+        # --- JSON 数据 ---
+        def 解析JSON(文本):
+            import json
+            if isinstance(文本, (dict, list)):
+                return 文本
+            文本值 = str(文本).strip()
+            if not 文本值:
+                return {}
+            return json.loads(文本值)
+        def 生成JSON(对象, 美化=True):
+            import json
+            缩进 = 2 if bool(美化) else None
+            return json.dumps(对象, ensure_ascii=False, indent=缩进)
+        def 读JSON(路径):
+            import json
+            with open(str(路径), "r", encoding="utf-8") as f:
+                return json.load(f)
+        def 写JSON(路径, 对象, 美化=True):
+            import json
+            缩进 = 2 if bool(美化) else None
+            with open(str(路径), "w", encoding="utf-8") as f:
+                json.dump(对象, f, ensure_ascii=False, indent=缩进)
+            return str(路径)
+        self.全局环境.记住("解析JSON", 解析JSON)
+        self.全局环境.记住("生成JSON", 生成JSON)
+        self.全局环境.记住("读JSON", 读JSON)
+        self.全局环境.记住("写JSON", 写JSON)
+
+        # --- HTTP 请求 ---
+        def _整理请求体(数据):
+            if 数据 is None:
+                return None, None
+            if isinstance(数据, (bytes, bytearray)):
+                return bytes(数据), None
+            if isinstance(数据, (dict, list)):
+                import json
+                return json.dumps(数据, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8"
+            文本 = str(数据)
+            if not 文本:
+                return None, None
+            return 文本.encode("utf-8"), "text/plain; charset=utf-8"
+
+        def 发起请求(网址, 方法="GET", 数据=None, 请求头=None, 超时秒=15):
+            from urllib import request as _req
+            from urllib.error import HTTPError, URLError
+            目标网址 = str(网址).strip()
+            if not 目标网址:
+                return {"成功": False, "错误": "网址不能为空", "状态码": 0, "内容": "", "头": {}}
+
+            方法文本 = str(方法).strip().upper() if 方法 else "GET"
+            if not 方法文本:
+                方法文本 = "GET"
+            头 = dict(请求头) if isinstance(请求头, dict) else {}
+            请求体, 默认类型 = _整理请求体(数据)
+            if 默认类型 and "Content-Type" not in 头 and "content-type" not in 头:
+                头["Content-Type"] = 默认类型
+
+            req = _req.Request(目标网址, data=请求体, method=方法文本, headers=头)
+            try:
+                with _req.urlopen(req, timeout=float(超时秒)) as resp:
+                    原始内容 = resp.read()
+                    字符集 = resp.headers.get_content_charset() or "utf-8"
+                    文本内容 = 原始内容.decode(字符集, errors="replace")
+                    return {
+                        "成功": True,
+                        "状态码": int(getattr(resp, "status", 200)),
+                        "内容": 文本内容,
+                        "头": dict(resp.headers.items()),
+                    }
+            except HTTPError as e:
+                原始内容 = e.read() if hasattr(e, "read") else b""
+                文本内容 = 原始内容.decode("utf-8", errors="replace")
+                return {"成功": False, "状态码": int(getattr(e, "code", 0)), "内容": 文本内容, "头": dict(getattr(e, "headers", {}).items()) if getattr(e, "headers", None) else {}, "错误": str(e)}
+            except URLError as e:
+                return {"成功": False, "状态码": 0, "内容": "", "头": {}, "错误": str(e)}
+            except Exception as e:
+                return {"成功": False, "状态码": 0, "内容": "", "头": {}, "错误": str(e)}
+
+        def 发GET(网址, 请求头=None, 超时秒=15):
+            return 发起请求(网址, "GET", None, 请求头, 超时秒)
+
+        def 发POST(网址, 数据=None, 请求头=None, 超时秒=15):
+            return 发起请求(网址, "POST", 数据, 请求头, 超时秒)
+
+        def 读响应JSON(响应, 默认值=None):
+            import json
+            if isinstance(响应, dict):
+                内容 = 响应.get("内容", "")
+            else:
+                内容 = 响应
+            try:
+                return json.loads(str(内容))
+            except Exception:
+                if 默认值 is not None:
+                    return 默认值
+                return {}
+
+        def 发GET_JSON(网址, 请求头=None, 超时秒=15):
+            响应 = 发GET(网址, 请求头, 超时秒)
+            响应["JSON"] = 读响应JSON(响应, None)
+            return 响应
+
+        def 发POST_JSON(网址, 数据=None, 请求头=None, 超时秒=15):
+            响应 = 发POST(网址, 数据, 请求头, 超时秒)
+            响应["JSON"] = 读响应JSON(响应, None)
+            return 响应
+
+        self.全局环境.记住("发起请求", 发起请求)
+        self.全局环境.记住("发GET", 发GET)
+        self.全局环境.记住("发POST", 发POST)
+        self.全局环境.记住("读响应JSON", 读响应JSON)
+        self.全局环境.记住("发GET_JSON", 发GET_JSON)
+        self.全局环境.记住("发POST_JSON", 发POST_JSON)
+
+        # --- SQLite 本地数据库 ---
+        数据库自动提交配置 = {}
+
+        def _参数转元组(参数):
+            if 参数 is None or 参数 == "":
+                return ()
+            if isinstance(参数, tuple):
+                return 参数
+            if isinstance(参数, list):
+                return tuple(参数)
+            return (参数,)
+
+        def 打开数据库(路径, 自动提交=True):
+            import sqlite3
+            连接 = sqlite3.connect(str(路径))
+            数据库自动提交配置[id(连接)] = bool(自动提交)
+            return 连接
+
+        def 执行SQL(连接, SQL, 参数=None):
+            cur = 连接.cursor()
+            cur.execute(str(SQL), _参数转元组(参数))
+            if 数据库自动提交配置.get(id(连接), True):
+                连接.commit()
+            return cur.rowcount
+
+        def 查询SQL(连接, SQL, 参数=None):
+            cur = 连接.cursor()
+            cur.execute(str(SQL), _参数转元组(参数))
+            列定义 = [d[0] for d in (cur.description or [])]
+            结果 = []
+            for 行 in cur.fetchall():
+                if 列定义:
+                    结果.append({列定义[i]: 行[i] for i in range(len(列定义))})
+                else:
+                    结果.append(list(行))
+            return 结果
+
+        def 开始事务(连接):
+            if 连接:
+                连接.execute("BEGIN")
+            return True
+
+        def 提交事务(连接):
+            if 连接:
+                连接.commit()
+            return True
+
+        def 回滚事务(连接):
+            if 连接:
+                连接.rollback()
+            return True
+
+        def 关闭数据库(连接):
+            if 连接:
+                数据库自动提交配置.pop(id(连接), None)
+                连接.close()
+            return 空值()
+
+        self.全局环境.记住("打开数据库", 打开数据库)
+        self.全局环境.记住("执行SQL", 执行SQL)
+        self.全局环境.记住("查询SQL", 查询SQL)
+        self.全局环境.记住("开始事务", 开始事务)
+        self.全局环境.记住("提交事务", 提交事务)
+        self.全局环境.记住("回滚事务", 回滚事务)
+        self.全局环境.记住("关闭数据库", 关闭数据库)
         
         # --- 类型判断 ---
         def 类型(对象):
@@ -575,25 +804,21 @@ class 解释器:
         def 写字(文字): turtle.write(str(文字), align="center", font=("Microsoft YaHei", 24, "normal"))
         def 监听按键(): turtle.listen()
         
-        # 必须处理易码函数的闭包环境
-        def 绑定按键(易码函数节点, 按键名):
-            if not isinstance(易码函数节点, 定义函数节点):
-                from .错误 import 运行报错
-                raise 运行报错("绑定按键的第一个参数必须是功能名称。", 0)
-                
-            解释器引用 = self
-            旧实例环境 = getattr(self, '_当前实例环境', None)
-            
+        # 兼容“功能对象”与可调用对象，按键回调默认无参数
+        def 绑定按键(可调用目标, 按键名):
+            from .错误 import 运行报错
+            函数对象 = self._转成易码函数对象(可调用目标, self.全局环境)
+            if not 函数对象 and not hasattr(可调用目标, "__call__"):
+                raise 运行报错("绑定按键的第一个参数必须是功能名称或可调用目标。", 0)
+
             def 内部回调():
-                # 简单调用
-                函数环境 = 环境(爸爸环境=self.全局环境, 禁止向上赋值=self.严格局部作用域)
-                from .信号 import 返回信号
-                for 语句 in 易码函数节点.代码块:
-                    try:
-                        解释器引用.执行(语句, 函数环境)
-                    except 返回信号:
-                        break
-            
+                if 函数对象:
+                    if len(函数对象.参数列表) != 0:
+                        raise 运行报错(f"按键回调【{函数对象.函数名}】不能带参数。", 0)
+                    self._执行易码函数对象(函数对象, [], 0)
+                    return
+                可调用目标()
+
             turtle.onkey(内部回调, str(按键名))
 
         def 计算距离(x, y):
@@ -875,7 +1100,7 @@ class 解释器:
         注册名 = 节点.别名 if 节点.别名 else 节点.模块名.split('/')[-1].split('.')[0]
         
         # ========== 第一优先级：内置虚拟模块（它们的函数已经在启动时注入全局环境了）==========
-        内置模块集 = {"图形界面", "魔法生态库", "文件管理", "画板"}
+        内置模块集 = {"图形界面", "魔法生态库", "文件管理", "画板", "系统工具", "数据工具", "网络请求", "本地数据库"}
         if 节点.模块名 in 内置模块集:
             if 节点.别名:
                 环境上下文.记住(注册名, self._内置模块命名空间(节点.模块名, 环境上下文))
@@ -907,6 +1132,14 @@ class 解释器:
     def _做_精确引入语句节点(self, 节点: 精确引入语句节点, 环境上下文: 环境):
         import importlib
         from .错误 import 易码错误, 运行报错
+
+        内置模块集 = {"图形界面", "魔法生态库", "文件管理", "画板", "系统工具", "数据工具", "网络请求", "本地数据库"}
+        if 节点.模块名 in 内置模块集:
+            命名空间 = self._内置模块命名空间(节点.模块名, 环境上下文)
+            if 节点.功能名 in 命名空间:
+                环境上下文.记住(节点.功能名, 命名空间[节点.功能名])
+                return 空值()
+            raise 运行报错(f"内置模块【{节点.模块名}】中不存在名称【{节点.功能名}】。", 节点.行号)
         
         绝对路径 = self._定位易码模块文件(节点.模块名)
         if 绝对路径:

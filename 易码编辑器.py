@@ -114,6 +114,8 @@ class 易码IDE:
             "显示": "显示 ‹内容›",
             "定义图纸": "定义图纸 ‹名字›(‹属性›)\n    它的 ‹属性› = ‹属性›\n\n    功能 ‹方法›()\n        ‹代码›",
         }
+
+        self.builtin_words = self._builtin_word_catalog()
         
         # 智能联想词库 (合并了所有常用字面量、系统函数和代码片段)
         self.autocomplete_words = sorted(list(set(
@@ -121,11 +123,7 @@ class 易码IDE:
             "如果", "否则如果", "不然", "当", "的时候", "重复", "次", "遍历", "里的每一个", "停下", "略过",
             "引入", "用", "中的", "输入", "定义图纸", "造一个", "它的",
             "对", "错", "空"] +
-            ["排列", "新列表", "是一份清单", "加入", "插入", "长度", "删除", "转数字", "转文字", "取随机数",
-             "所有键", "所有值", "存在", "截取", "查找", "替换", "分割", "去空格", "包含", "读文件", "写文件", "追加文件",
-             "显示", "建窗口", "加文字", "加输入框", "加按钮", "读输入", "改文字", "弹窗", "弹窗输入", "打开界面",
-             "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
-             "画布", "向前走", "向后走", "左转", "右转", "抬笔", "落笔", "笔粗", "画圆", "背景颜色", "定格"] +
+            self.builtin_words +
             list(self.snippets.keys())
         )))
 
@@ -165,6 +163,28 @@ class 易码IDE:
         self.setup_ui()
         self.bind_global_shortcuts()
         self.root.protocol("WM_DELETE_WINDOW", self.on_app_close)
+
+    def _builtin_word_catalog(self):
+        return [
+            "排列", "新列表", "是一份清单", "加入", "插入", "长度", "删除",
+            "转数字", "转文字", "取随机数",
+            "所有键", "所有值", "存在",
+            "截取", "查找", "替换", "分割", "去空格", "包含",
+            "读文件", "写文件", "追加文件",
+            "文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录", "拼路径", "绝对路径", "当前目录",
+            "解析JSON", "生成JSON", "读JSON", "写JSON",
+            "发起请求", "发GET", "发POST", "读响应JSON", "发GET_JSON", "发POST_JSON",
+            "打开数据库", "执行SQL", "查询SQL", "开始事务", "提交事务", "回滚事务", "关闭数据库",
+            "排序", "倒序", "去重", "合并", "最大值", "最小值",
+            "绝对值", "四舍五入", "现在时间", "时间戳",
+            "类型",
+            "显示", "输入",
+            "建窗口", "加文字", "加输入框", "加按钮", "读输入", "改文字", "弹窗", "弹窗输入", "打开界面",
+            "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
+            "画布", "标题", "图标", "向前走", "向后走", "左转", "右转", "抬笔", "落笔", "画笔颜色", "背景颜色", "去", "笔粗",
+            "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画", "刷新画面", "清除", "写字", "开始监听", "绑定按键",
+            "计算距离", "当前X", "当前Y",
+        ]
 
     def setup_ui(self):
         # 顶部工具栏 (更窄，更紧凑)
@@ -457,6 +477,7 @@ class 易码IDE:
         target_editor.tag_configure("Boolean", foreground="#4FC1FF", font=(self.font_code[0], self.font_code[1], "bold"))  # 亮蓝：布尔值
         target_editor.tag_configure("Builtin", foreground="#DCDCAA", font=(self.font_code[0], self.font_code[1], "bold"))  # 浅黄：内置函数
         target_editor.tag_configure("ErrorLine", background="#51222A")
+        target_editor.tag_configure("WarnLine", background="#4D4521")
         target_editor.tag_configure("SearchMatch", background="#3B3A1A", foreground="#F3E99A")
         target_editor.tag_configure("SearchCurrent", background="#6A5C1A", foreground="#FFF4AA")
         target_editor.tag_configure("MultiCursorSel", background="#1D4B63", foreground="#FFFFFF")
@@ -468,6 +489,7 @@ class 易码IDE:
         target_editor.tag_configure("CurrentLine", background=self.theme_line_bg)
         target_editor.tag_lower("CurrentLine")
         target_editor.tag_raise("ErrorLine")
+        target_editor.tag_raise("WarnLine")
         target_editor.tag_raise("SearchMatch")
         target_editor.tag_raise("SearchCurrent")
         target_editor.tag_raise("MultiCursorSel")
@@ -566,6 +588,7 @@ class 易码IDE:
         color_map = {
             "ok": "#C8E6C9",
             "info": "#9CDCFE",
+            "warn": "#FFD27F",
             "error": "#FFAB91",
         }
         try:
@@ -581,7 +604,7 @@ class 易码IDE:
 
         diagnostic = self.tabs_data[tab_id].get("diagnostic")
         if not diagnostic:
-            self.status_main_var.set("当前没有可跳转的语法错误")
+            self.status_main_var.set("当前没有可跳转的语法/语义问题")
             return "break"
 
         line = max(1, int(diagnostic.get("line") or 1))
@@ -659,6 +682,244 @@ class 易码IDE:
                 pass
         self._diagnose_after_id = self.root.after(120, self._run_live_diagnose)
 
+    def _默认模块别名(self, 模块名):
+        名称 = str(模块名 or "").replace("\\", "/").rstrip("/")
+        if not 名称:
+            return "模块"
+        名称 = 名称.split("/")[-1]
+        if 名称.endswith(".ym"):
+            名称 = 名称[:-3]
+        return 名称 or "模块"
+
+    def _收集块声明(self, 语句列表):
+        名称集 = set()
+        函数签名 = {}
+        for 语句 in 语句列表 or []:
+            类型名 = type(语句).__name__
+            if 类型名 == "变量设定节点":
+                名称集.add(getattr(语句, "名称", ""))
+            elif 类型名 == "定义函数节点":
+                函数名 = getattr(语句, "函数名", "")
+                if 函数名:
+                    名称集.add(函数名)
+                    函数签名[函数名] = len(getattr(语句, "参数列表", []) or [])
+            elif 类型名 == "图纸定义节点":
+                图纸名 = getattr(语句, "图纸名", "")
+                if 图纸名:
+                    名称集.add(图纸名)
+            elif 类型名 == "引入语句节点":
+                别名 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
+                if 别名:
+                    名称集.add(别名)
+            elif 类型名 == "精确引入语句节点":
+                功能名 = getattr(语句, "功能名", "")
+                if 功能名:
+                    名称集.add(功能名)
+            elif 类型名 == "重复循环节点":
+                变量名 = getattr(语句, "循环变量名", None)
+                if 变量名:
+                    名称集.add(变量名)
+            elif 类型名 == "遍历循环节点":
+                元素名 = getattr(语句, "元素名", "")
+                if 元素名:
+                    名称集.add(元素名)
+            elif 类型名 == "尝试语句节点":
+                错误名 = getattr(语句, "错误捕获名", None)
+                if 错误名:
+                    名称集.add(错误名)
+        名称集.discard("")
+        return 名称集, 函数签名
+
+    def _语义分析(self, 语法树):
+        警告列表 = []
+        已记录 = set()
+        内置名称 = set(self.builtin_words)
+        内置名称.update({"对", "错", "空"})
+
+        def 记警告(行号, 消息, 列号=None):
+            try:
+                行号值 = max(1, int(行号 or 1))
+            except (ValueError, TypeError):
+                行号值 = 1
+            try:
+                列号值 = int(列号) if 列号 else None
+            except (ValueError, TypeError):
+                列号值 = None
+            键 = (行号值, 列号值, 消息)
+            if 键 in 已记录:
+                return
+            已记录.add(键)
+            警告列表.append({
+                "line": 行号值,
+                "col": 列号值,
+                "message": 消息,
+                "type": "语义提示",
+            })
+
+        def 名称已定义(名字, 作用域栈):
+            if not 名字:
+                return True
+            if 名字 in 内置名称:
+                return True
+            for 作用域 in reversed(作用域栈):
+                if 名字 in 作用域:
+                    return True
+            return False
+
+        def 查函数参数个数(名字, 函数栈):
+            for 函数字典 in reversed(函数栈):
+                if 名字 in 函数字典:
+                    return 函数字典[名字]
+            return None
+
+        def 分析表达式(节点, 作用域栈, 函数栈):
+            if 节点 is None:
+                return
+            类型名 = type(节点).__name__
+
+            if 类型名 == "变量访问节点":
+                名字 = getattr(节点, "名称", "")
+                if not 名称已定义(名字, 作用域栈):
+                    记警告(getattr(节点, "行号", 1), f"名称【{名字}】在当前上下文可能未定义。")
+                return
+
+            if 类型名 == "函数调用节点":
+                名字 = getattr(节点, "函数名", "")
+                参数列表 = getattr(节点, "参数列表", []) or []
+                if not 名称已定义(名字, 作用域栈):
+                    记警告(getattr(节点, "行号", 1), f"调用目标【{名字}】可能未定义。")
+                else:
+                    期望个数 = 查函数参数个数(名字, 函数栈)
+                    if 期望个数 is not None and 期望个数 != len(参数列表):
+                        记警告(getattr(节点, "行号", 1), f"功能【{名字}】参数个数可能不匹配：期望 {期望个数}，实际 {len(参数列表)}。")
+                for 参数 in 参数列表:
+                    分析表达式(参数, 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "动态调用节点":
+                分析表达式(getattr(节点, "目标节点", None), 作用域栈, 函数栈)
+                for 参数 in getattr(节点, "参数列表", []) or []:
+                    分析表达式(参数, 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "二元运算节点":
+                分析表达式(getattr(节点, "左边", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "右边", None), 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "一元运算节点":
+                分析表达式(getattr(节点, "操作数", None), 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "属性访问节点":
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "属性设置节点":
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "索引访问节点":
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "索引设置节点":
+                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈)
+                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "列表字面量节点":
+                for 项 in getattr(节点, "元素列表", []) or []:
+                    分析表达式(项, 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "字典字面量节点":
+                for 键节点, 值节点 in getattr(节点, "键值对列表", []) or []:
+                    分析表达式(键节点, 作用域栈, 函数栈)
+                    分析表达式(值节点, 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "输入表达式节点":
+                分析表达式(getattr(节点, "提示语句表达式", None), 作用域栈, 函数栈)
+                return
+
+            if 类型名 == "实例化节点":
+                图纸名 = getattr(节点, "图纸名", "")
+                if 图纸名 and not 名称已定义(图纸名, 作用域栈):
+                    记警告(getattr(节点, "行号", 1), f"图纸【{图纸名}】可能未定义。")
+                for 参数 in getattr(节点, "参数列表", []) or []:
+                    分析表达式(参数, 作用域栈, 函数栈)
+                return
+
+        def 分析代码块(语句列表, 上层作用域栈, 上层函数栈, 额外名称=None, 额外函数签名=None):
+            块声明名, 块函数签名 = self._收集块声明(语句列表)
+            本地作用域 = set(块声明名)
+            if 额外名称:
+                本地作用域.update(额外名称)
+            本地函数签名 = dict(块函数签名)
+            if 额外函数签名:
+                本地函数签名.update(额外函数签名)
+            当前作用域栈 = list(上层作用域栈) + [本地作用域]
+            当前函数栈 = list(上层函数栈) + [本地函数签名]
+
+            for 语句 in 语句列表 or []:
+                类型名 = type(语句).__name__
+                if 类型名 == "显示语句节点":
+                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈)
+                elif 类型名 == "变量设定节点":
+                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈)
+                elif 类型名 == "如果语句节点":
+                    for 条件, 分支 in getattr(语句, "条件分支列表", []) or []:
+                        分析表达式(条件, 当前作用域栈, 当前函数栈)
+                        分析代码块(分支, 当前作用域栈, 当前函数栈)
+                    否则分支 = getattr(语句, "否则分支列表", None)
+                    if 否则分支:
+                        分析代码块(否则分支, 当前作用域栈, 当前函数栈)
+                elif 类型名 == "当循环节点":
+                    分析表达式(getattr(语句, "条件", None), 当前作用域栈, 当前函数栈)
+                    分析代码块(getattr(语句, "循环体", []), 当前作用域栈, 当前函数栈)
+                elif 类型名 == "重复循环节点":
+                    分析表达式(getattr(语句, "次数表达式", None), 当前作用域栈, 当前函数栈)
+                    额外名 = set()
+                    变量名 = getattr(语句, "循环变量名", None)
+                    if 变量名:
+                        额外名.add(变量名)
+                    分析代码块(getattr(语句, "循环体", []), 当前作用域栈, 当前函数栈, 额外名称=额外名)
+                elif 类型名 == "遍历循环节点":
+                    分析表达式(getattr(语句, "列表表达式", None), 当前作用域栈, 当前函数栈)
+                    额外名 = set()
+                    元素名 = getattr(语句, "元素名", "")
+                    if 元素名:
+                        额外名.add(元素名)
+                    分析代码块(getattr(语句, "循环体", []), 当前作用域栈, 当前函数栈, 额外名称=额外名)
+                elif 类型名 == "尝试语句节点":
+                    分析代码块(getattr(语句, "尝试代码块", []), 当前作用域栈, 当前函数栈)
+                    额外名 = set()
+                    错误名 = getattr(语句, "错误捕获名", None)
+                    if 错误名:
+                        额外名.add(错误名)
+                    分析代码块(getattr(语句, "出错代码块", []), 当前作用域栈, 当前函数栈, 额外名称=额外名)
+                elif 类型名 == "定义函数节点":
+                    参数名 = set(getattr(语句, "参数列表", []) or [])
+                    分析代码块(getattr(语句, "代码块", []), 当前作用域栈, 当前函数栈, 额外名称=参数名)
+                elif 类型名 == "图纸定义节点":
+                    参数名 = set(getattr(语句, "参数列表", []) or [])
+                    分析代码块(getattr(语句, "代码块", []), 当前作用域栈, 当前函数栈, 额外名称=参数名)
+                elif 类型名 == "返回语句节点":
+                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈)
+                elif 类型名 in ("引入语句节点", "精确引入语句节点", "跳出语句节点", "继续语句节点"):
+                    continue
+                else:
+                    分析表达式(语句, 当前作用域栈, 当前函数栈)
+
+        顶层语句 = getattr(语法树, "语句列表", []) or []
+        分析代码块(顶层语句, [set(内置名称)], [dict()])
+        警告列表.sort(key=lambda x: (x.get("line") or 1, x.get("col") or 0))
+        return 警告列表
+
     def _run_live_diagnose(self):
         self._diagnose_after_id = None
         editor = self._get_current_editor()
@@ -667,17 +928,38 @@ class 易码IDE:
             return
 
         editor.tag_remove("ErrorLine", "1.0", "end")
+        editor.tag_remove("WarnLine", "1.0", "end")
         code = editor.get("1.0", "end-1c")
         if not code.strip():
             self.tabs_data[tab_id]["diagnostic"] = None
+            self.tabs_data[tab_id]["semantic_warnings"] = []
             self._set_diagnostic_status("语法检查：等待输入", level="info")
             return
 
         try:
             tokens = 词法分析器(code).分析()
-            语法分析器(tokens).解析()
-            self.tabs_data[tab_id]["diagnostic"] = None
-            self._set_diagnostic_status("语法检查：通过", level="ok")
+            语法树 = 语法分析器(tokens).解析()
+            语义警告 = self._语义分析(语法树)
+            self.tabs_data[tab_id]["semantic_warnings"] = 语义警告
+
+            if 语义警告:
+                首条 = 语义警告[0]
+                line = int(首条.get("line") or 1)
+                col = 首条.get("col")
+                try:
+                    editor.tag_add("WarnLine", f"{line}.0", f"{line}.end+1c")
+                except tk.TclError:
+                    pass
+                self.tabs_data[tab_id]["diagnostic"] = 首条
+                self._set_diagnostic_status(
+                    f"语义提示：第 {line} 行"
+                    + (f"，列 {col}" if col else "")
+                    + f" - {首条.get('message', '')}（共 {len(语义警告)} 处）",
+                    level="warn"
+                )
+            else:
+                self.tabs_data[tab_id]["diagnostic"] = None
+                self._set_diagnostic_status("语法检查：通过", level="ok")
         except 易码错误 as e:
             line = int(e.行号) if e.行号 else 1
             line = max(1, line)
@@ -695,12 +977,14 @@ class 易码IDE:
                 "message": error_text,
                 "type": e.错误类型,
             }
+            self.tabs_data[tab_id]["semantic_warnings"] = []
             self._set_diagnostic_status(
                 f"{e.错误类型}：第 {line} 行{col_text} - {error_text}",
                 level="error"
             )
         except Exception as e:
             self.tabs_data[tab_id]["diagnostic"] = None
+            self.tabs_data[tab_id]["semantic_warnings"] = []
             self._set_diagnostic_status(f"语法检查失败：{e}", level="error")
 
     def _handle_return(self, event=None):
@@ -2262,14 +2546,7 @@ class 易码IDE:
         
         booleans = ["对", "错", "空"]
         
-        builtins_list = ["排列", "新列表", "是一份清单", "加入", "插入", "长度", "删除", 
-                         "转数字", "转文字", "取随机数",
-                         "所有键", "所有值", "存在",
-                         "截取", "查找", "替换", "分割", "去空格", "包含",
-                         "读文件", "写文件", "追加文件",
-                         "显示", "输入",
-                         "建窗口", "加文字", "加输入框", "加按钮", "读输入", "改文字", "弹窗", "弹窗输入", "打开界面",
-                         "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行"]
+        builtins_list = self.builtin_words
         
         def apply_tags(word_list, tag_name):
             # 将单词按长度降序排列，保证长词(如有包含关系)优先被匹配
@@ -2712,6 +2989,7 @@ class 易码IDE:
             "guide_canvas": guide_canvas,
             "dirty": False,
             "diagnostic": None,
+            "semantic_warnings": [],
             "folds": {},
             "outline_items": [],
             "multi_cursor": {"query": "", "stage": "ranges", "ranges": [], "points": [], "last_abs": -1}
@@ -3286,33 +3564,58 @@ class 易码IDE:
         def 默认输出路径(名称):
             return os.path.join(os.path.expanduser("~"), "Desktop", f"{清理软件名(名称)}.exe")
 
-        自动路径状态 = {"最近自动路径": 默认输出路径(当前文件名)}
-        path_var.set(自动路径状态["最近自动路径"])
+        def 解析保存目录(路径文本):
+            文本 = str(路径文本 or "").strip()
+            if not 文本:
+                return os.path.join(os.path.expanduser("~"), "Desktop")
+            文本 = os.path.abspath(os.path.expanduser(文本))
+            if 文本.lower().endswith(".exe"):
+                return os.path.dirname(文本) or os.path.join(os.path.expanduser("~"), "Desktop")
+            if os.path.isdir(文本):
+                return 文本
+            # 没有后缀时按目录理解，便于直接输入新目录名
+            if os.path.splitext(文本)[1] == "":
+                return 文本
+            return os.path.dirname(文本) or os.path.join(os.path.expanduser("~"), "Desktop")
 
-        def 软件名变化(*_):
-            当前路径 = path_var.get().strip()
-            if (not 当前路径) or (当前路径 == 自动路径状态["最近自动路径"]):
-                新路径 = 默认输出路径(app_name_var.get())
-                path_var.set(新路径)
-                自动路径状态["最近自动路径"] = 新路径
+        def 刷新目标路径():
+            保存目录 = 解析保存目录(path_var.get())
+            软件名文件 = f"{清理软件名(app_name_var.get())}.exe"
+            path_var.set(os.path.join(保存目录, 软件名文件))
 
-        app_name_var.trace_add("write", 软件名变化)
+        path_var.set(默认输出路径(当前文件名))
+        app_name_var.trace_add("write", lambda *_: 刷新目标路径())
 
-        def browse_save_path():
-            默认文件名 = f"{清理软件名(app_name_var.get())}.exe"
-            filepath = filedialog.asksaveasfilename(
-                title="选择保存位置", defaultextension=".exe", filetypes=[("Windows 软件", "*.exe")], parent=dlg,
-                initialfile=默认文件名
-            )
-            if filepath:
-                if not filepath.lower().endswith(".exe"):
-                    filepath += ".exe"
-                path_var.set(filepath)
-            
-        def create_browse_btn(parent, cmd):
-            return tk.Button(parent, text="浏览...", command=cmd, bg=self.theme_toolbar_bg, fg=self.theme_fg, activebackground="#505050", activeforeground="#FFFFFF", relief="flat", borderwidth=0, cursor="hand2")
+        def 选择保存目录():
+            初始目录 = 解析保存目录(path_var.get())
+            目录 = filedialog.askdirectory(title="选择保存目录", initialdir=初始目录, parent=dlg)
+            if 目录:
+                path_var.set(os.path.join(目录, f"{清理软件名(app_name_var.get())}.exe"))
 
-        create_browse_btn(form_frame, browse_save_path).grid(row=1, column=2, padx=(10, 0), pady=10, ipadx=5, ipady=2)
+        路径侧栏 = tk.Frame(form_frame, bg=self.theme_sidebar_bg)
+        路径侧栏.grid(row=1, column=2, padx=(10, 0), sticky="w")
+        tk.Button(
+            路径侧栏,
+            text="选择目录",
+            command=选择保存目录,
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_toolbar_bg,
+            fg=self.theme_fg,
+            activebackground="#505050",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            padx=10,
+            pady=2,
+        ).pack(anchor="w")
+        tk.Label(
+            路径侧栏,
+            text="文件名将按“软件名称”自动生成",
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_sidebar_bg,
+            fg="#8FA5B5",
+        ).pack(anchor="w", pady=(4, 0))
 
         # 3. 个性图标
         tk.Label(form_frame, text="个性图标：", font=self.font_ui, bg=self.theme_sidebar_bg, fg=self.theme_fg).grid(row=2, column=0, sticky="e", pady=10)
@@ -3335,29 +3638,90 @@ class 易码IDE:
         icon_entry.bind("<FocusIn>", on_icon_focus_in)
         icon_entry.bind("<FocusOut>", on_icon_focus_out)
 
-        def browse_icon():
-            filepath = filedialog.askopenfilename(
-                title="选择 .ico 图标", filetypes=[("Windows 图标文件", "*.ico")], parent=dlg
+        def 选择图标():
+            初始目录 = self.workspace_dir if os.path.isdir(self.workspace_dir) else os.path.expanduser("~")
+            当前图标 = icon_var.get().strip()
+            if 当前图标 and os.path.isfile(当前图标):
+                初始目录 = os.path.dirname(os.path.abspath(当前图标))
+            文件 = filedialog.askopenfilename(
+                title="选择 .ico 图标",
+                initialdir=初始目录,
+                filetypes=[("Windows 图标文件", "*.ico")],
+                parent=dlg,
             )
-            if filepath:
+            if 文件:
                 icon_entry.config(foreground=self.theme_fg)
-                icon_var.set(filepath)
-                
-        create_browse_btn(form_frame, browse_icon).grid(row=2, column=2, padx=(10, 0), pady=10, ipadx=5, ipady=2)
+                icon_var.set(文件)
+
+        图标侧栏 = tk.Frame(form_frame, bg=self.theme_sidebar_bg)
+        图标侧栏.grid(row=2, column=2, padx=(10, 0), sticky="w")
+        tk.Button(
+            图标侧栏,
+            text="选择图标",
+            command=选择图标,
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_toolbar_bg,
+            fg=self.theme_fg,
+            activebackground="#505050",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            padx=10,
+            pady=2,
+        ).pack(anchor="w")
+        tk.Label(
+            图标侧栏,
+            text="留空=默认图标",
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_sidebar_bg,
+            fg="#8FA5B5",
+        ).pack(anchor="w", pady=(4, 0))
 
         # 4. 运行模式 (黑框)
-        tk.Label(form_frame, text="运行模式：", font=self.font_ui, bg=self.theme_sidebar_bg, fg=self.theme_fg).grid(row=3, column=0, sticky="e", pady=10)
+        tk.Label(form_frame, text="运行模式：", font=self.font_ui, bg=self.theme_sidebar_bg, fg=self.theme_fg).grid(row=3, column=0, sticky="ne", pady=10)
         mode_var = tk.IntVar(value=1) # 默认 1 (显示控制台)
-        radio_frame = tk.Frame(form_frame, bg=self.theme_sidebar_bg)
-        radio_frame.grid(row=3, column=1, columnspan=2, sticky="w")
-        ttk.Radiobutton(radio_frame, text="代码黑框版 (带文字调试口)", variable=mode_var, value=1).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Radiobutton(radio_frame, text="纯净窗口版 (隐藏黑框，适用画板/弹窗)", variable=mode_var, value=2).pack(side=tk.LEFT)
+        mode_frame = tk.Frame(form_frame, bg=self.theme_sidebar_bg)
+        mode_frame.grid(row=3, column=1, columnspan=2, sticky="w", pady=10)
 
-        # Configure custom style for dark ttk radiobuttons
-        style = ttk.Style()
-        style.configure("Dark.TRadiobutton", background=self.theme_sidebar_bg, foreground=self.theme_fg)
-        for child in radio_frame.winfo_children():
-            child.configure(style="Dark.TRadiobutton")
+        tk.Radiobutton(
+            mode_frame,
+            text="代码黑框版（推荐调试）",
+            variable=mode_var,
+            value=1,
+            font=self.font_ui,
+            bg=self.theme_sidebar_bg,
+            fg="#DCE7F3",
+            activebackground=self.theme_sidebar_bg,
+            activeforeground="#FFFFFF",
+            selectcolor=self.theme_bg,
+            anchor="w",
+            padx=2,
+        ).pack(anchor="w")
+
+        tk.Radiobutton(
+            mode_frame,
+            text="纯净窗口版（发布给用户）",
+            variable=mode_var,
+            value=2,
+            font=self.font_ui,
+            bg=self.theme_sidebar_bg,
+            fg="#DCE7F3",
+            activebackground=self.theme_sidebar_bg,
+            activeforeground="#FFFFFF",
+            selectcolor=self.theme_bg,
+            anchor="w",
+            padx=2,
+        ).pack(anchor="w", pady=(6, 0))
+
+        tk.Label(
+            mode_frame,
+            text="黑框版会显示日志窗口；纯净版不显示黑框。",
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_sidebar_bg,
+            fg="#8FA5B5",
+            anchor="w",
+        ).pack(anchor="w", pady=(6, 0))
 
         # 底部按钮
         btn_frame = tk.Frame(dlg, bg=self.theme_sidebar_bg)
@@ -3370,12 +3734,17 @@ class 易码IDE:
                 return
             软件名称 = 清理软件名(软件名称原始)
 
-            target_path = path_var.get().strip()
-            if not target_path:
+            target_input = path_var.get().strip()
+            if not target_input:
                 messagebox.showerror("抱歉", "得给我一个保存地址呀！", parent=dlg)
                 return
-            if not target_path.lower().endswith(".exe"):
-                target_path += ".exe"
+            保存目录 = 解析保存目录(target_input)
+            try:
+                os.makedirs(保存目录, exist_ok=True)
+            except Exception as e:
+                messagebox.showerror("抱歉", f"保存目录不可用：{e}", parent=dlg)
+                return
+            target_path = os.path.join(保存目录, f"{软件名称}.exe")
                 
             icon_path = icon_var.get().strip()
             if icon_path == "(留空则使用默认易码图标)":
@@ -3400,6 +3769,13 @@ class 易码IDE:
                     with open(临时ym, 'w', encoding='utf-8') as f:
                         f.write(源码内容)
                         
+                    源码目录 = None
+                    当前文件路径 = self.tabs_data[tab_id]["filepath"] if (tab_id and tab_id in self.tabs_data) else None
+                    if 当前文件路径 and os.path.isfile(当前文件路径):
+                        源码目录 = os.path.dirname(os.path.abspath(当前文件路径))
+                    elif self.workspace_dir and os.path.isdir(self.workspace_dir):
+                        源码目录 = self.workspace_dir
+
                     from 易码打包工具 import 编译并打包
                     最终编译出来的路径 = 编译并打包(
                         临时ym,
@@ -3407,13 +3783,24 @@ class 易码IDE:
                         隐藏黑框=隐藏黑框,
                         进度打字机=打印进度,
                         软件名称=软件名称,
+                        源码目录=源码目录,
                     )
                     
-                    if os.path.exists(target_path):
-                        os.remove(target_path)
-                    shutil.move(最终编译出来的路径, target_path)
-                    
-                    self.root.after(0, lambda: messagebox.showinfo("打包完成", f"可执行文件已生成：\n{target_path}"))
+                    工具输出路径 = os.path.abspath(最终编译出来的路径)
+                    最终保存路径 = os.path.abspath(target_path)
+                    same_path = os.path.normcase(os.path.normpath(工具输出路径)) == os.path.normcase(os.path.normpath(最终保存路径))
+
+                    if not same_path:
+                        os.makedirs(os.path.dirname(最终保存路径), exist_ok=True)
+                        if os.path.exists(最终保存路径):
+                            os.remove(最终保存路径)
+                        # 保留易码_成品软件中的原始产物，同时复制到用户指定位置
+                        shutil.copy2(工具输出路径, 最终保存路径)
+
+                    self.root.after(0, lambda src=工具输出路径, dst=最终保存路径: self.print_output(
+                        f"📦 工具输出：{src}\n📍 最终保存：{dst}"
+                    ))
+                    self.root.after(0, lambda dst=最终保存路径: messagebox.showinfo("打包完成", f"可执行文件已生成：\n{dst}"))
                 except Exception as e:
                     self.root.after(0, lambda msg=str(e): messagebox.showerror("打包失败了", msg))
                     
@@ -3421,7 +3808,21 @@ class 易码IDE:
             t.daemon = True
             t.start()
 
-        create_browse_btn(btn_frame, dlg.destroy).pack(side=tk.RIGHT, padx=(10, 0))
+        tk.Button(
+            btn_frame,
+            text="取消",
+            font=("Microsoft YaHei", 9),
+            command=dlg.destroy,
+            bg=self.theme_toolbar_bg,
+            fg=self.theme_fg,
+            activebackground="#505050",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            padx=14,
+            pady=5,
+        ).pack(side=tk.RIGHT, padx=(10, 0))
         tk.Button(btn_frame, text="🚀 立即打包", font=("Microsoft YaHei", 10, "bold"), bg="#0E639C", fg="white", activebackground="#1177BB", activeforeground="white", relief="flat", borderwidth=0, cursor="hand2", padx=15, pady=5, command=start_packing).pack(side=tk.RIGHT)
 
 if __name__ == "__main__":
