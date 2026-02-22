@@ -25,6 +25,21 @@ class 语法分析器:
             return self.tokens[-1]
         return self.tokens[idx]
 
+    def _token可读文本(self, token):
+        if token is None:
+            return "未知"
+        特殊映射 = {
+            Token类型.换行: "换行",
+            Token类型.文件结束: "文件结束",
+            Token类型.缩进: "缩进",
+            Token类型.退缩: "退缩",
+        }
+        if token.类型 in 特殊映射:
+            return 特殊映射[token.类型]
+        if token.值 is not None and str(token.值) != "":
+            return str(token.值)
+        return token.类型.value
+
     def _吃掉(self, 期望类型, 报错消息=""):
         当前 = self._当前Token()
         if 当前.类型 == 期望类型:
@@ -32,13 +47,18 @@ class 语法分析器:
             return 当前
         
         # 报错处理，尽量用大白话
-        如果不给报错 = f"此处应为【{期望类型.value}】，实际读取到【{当前.值}】。"
+        读取到文本 = self._token可读文本(当前)
+        如果不给报错 = f"此处应为【{期望类型.value}】，实际读取到【{读取到文本}】。"
         跳过消息 = 报错消息 if 报错消息 else 如果不给报错
         建议 = f"请检查当前位置前后是否缺少【{期望类型.value}】，或多写了其它符号。"
         raise 语法报错(跳过消息, 当前.行号, 当前.列号, 建议)
 
     def _跳过多余换行(self):
         while self._当前Token().类型 == Token类型.换行:
+            self._前进()
+
+    def _跳过容器空白(self):
+        while self._当前Token().类型 in (Token类型.换行, Token类型.缩进, Token类型.退缩):
             self._前进()
 
     def 解析(self):
@@ -535,10 +555,13 @@ class 语法分析器:
             行号 = 当前.行号
             self._前进()
             元素列表 = []
+            self._跳过容器空白()
             while self._当前Token().类型 != Token类型.右方括号:
                 元素列表.append(self._解析表达式())
+                self._跳过容器空白()
                 if self._当前Token().类型 == Token类型.逗号:
                     self._前进()
+                    self._跳过容器空白()
                 elif self._当前Token().类型 == Token类型.右方括号:
                     break
                 else:
@@ -551,16 +574,20 @@ class 语法分析器:
             行号 = 当前.行号
             self._前进()
             键值对列表 = []
+            self._跳过容器空白()
             while self._当前Token().类型 != Token类型.右花括号:
                 # 解析键
                 键表达式 = self._解析表达式()
                 self._吃掉(Token类型.冒号, "字典的键和值之间必须使用冒号【:】。")
+                self._跳过容器空白()
                 # 解析值
                 值表达式 = self._解析表达式()
                 键值对列表.append((键表达式, 值表达式))
+                self._跳过容器空白()
                 
                 if self._当前Token().类型 == Token类型.逗号:
                     self._前进()
+                    self._跳过容器空白()
                 elif self._当前Token().类型 == Token类型.右花括号:
                     break
                 else:
@@ -569,7 +596,8 @@ class 语法分析器:
             primary = 字典字面量节点(键值对列表, 行号)
             
         else:
-            raise 语法报错(f"此处需要一个值或表达式，但读取到【{当前.值}】。", 当前.行号, 当前.列号)
+            读取到文本 = self._token可读文本(当前)
+            raise 语法报错(f"此处需要一个值或表达式，但读取到【{读取到文本}】。", 当前.行号, 当前.列号)
             
         # 解析后缀：属性访问(.) 和 动态调用()
         while True:
