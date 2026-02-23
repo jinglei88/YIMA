@@ -163,12 +163,19 @@ def error_regression_check() -> None:
     print("[OK] 错误体验回归通过")
 
 
+def editor_logic_regression_check() -> None:
+    out = run_cmd([PY, "scripts/run_editor_logic_regression.py"])
+    assert_contains(out, "编辑器逻辑回归完成：全部通过", "编辑器逻辑回归")
+    print("[OK] 编辑器逻辑回归通过")
+
+
 def main() -> int:
     print("=== 易码回归开始 ===")
     compile_check()
     sample_check()
     semantic_check()
     error_regression_check()
+    editor_logic_regression_check()
     print("=== 易码回归完成：全部通过 ===")
     return 0
 

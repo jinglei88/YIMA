@@ -173,6 +173,12 @@ python scripts/run_v1_contract_regression.py
 python scripts/run_error_regression.py
 ```
 
+仅验证编辑器逻辑（补全真实性/导出前置检查）：
+
+```bash
+python scripts/run_editor_logic_regression.py
+```
+
 ## 打包清单（可选）
 
 项目根目录可放 `易码打包清单.json`（或 `yima_pack.json`）补充打包信息：

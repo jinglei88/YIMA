@@ -737,6 +737,34 @@ class 易码IDE:
         self.issue_listbox.bind("<Double-Button-1>", self.on_issue_activate)
         self.issue_listbox.bind("<Return>", self.on_issue_activate)
         self.issue_listbox.bind("<ButtonRelease-1>", self._issue_update_status)
+        self.issue_listbox.bind("<<ListboxSelect>>", self._issue_update_status, add="+")
+
+        issue_detail_box = tk.Frame(issue_section, bg=self.theme_panel_bg, padx=8)
+        issue_detail_box.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            issue_detail_box,
+            text="问题详情",
+            font=("Microsoft YaHei", 8, "bold"),
+            bg=self.theme_panel_bg,
+            fg="#8FA1B8",
+            anchor="w",
+        ).pack(fill=tk.X, pady=(0, 4))
+
+        self.issue_detail_var = tk.StringVar(value="（当前文件无语法/语义问题）")
+        self.issue_detail_label = tk.Label(
+            issue_detail_box,
+            textvariable=self.issue_detail_var,
+            font=("Microsoft YaHei", 8),
+            bg=self.theme_panel_inner_bg,
+            fg="#9FB0C5",
+            anchor="nw",
+            justify="left",
+            padx=8,
+            pady=6,
+            wraplength=220,
+        )
+        self.issue_detail_label.pack(fill=tk.X)
+        self.issue_detail_label.bind("<Configure>", self._update_issue_detail_wrap, add="+")
         
         # 初始给左侧多分配一点空间，防止文字被遮挡
         sidebar_default_width = int(250 * self.dpi_scale)
@@ -1122,6 +1150,7 @@ class 易码IDE:
                 self.issue_listbox.selection_clear(0, tk.END)
                 self.issue_listbox.selection_set(导航索引 % len(问题列表))
                 self.issue_listbox.activate(导航索引 % len(问题列表))
+                self._issue_update_status()
             except tk.TclError:
                 pass
 
@@ -1183,6 +1212,36 @@ class 易码IDE:
 
         return 结果
 
+    def _缩略问题消息(self, 文本, 最大长度=44):
+        值 = str(文本 or "").strip().replace("\n", " ")
+        if len(值) <= 最大长度:
+            return 值
+        return 值[: max(1, 最大长度 - 1)] + "…"
+
+    def _格式化问题列表项(self, item):
+        级别 = str(item.get("level", "warn"))
+        前缀 = "[错]" if 级别 == "error" else "[提]"
+        分类 = "语法" if 级别 == "error" else str(item.get("category", "语义") or "语义")
+        行号 = int(item.get("line") or 1)
+        消息 = self._缩略问题消息(item.get("message", ""))
+        return f"{前缀}[{分类}] L{行号} {消息}"
+
+    def _update_issue_detail_wrap(self, event=None):
+        if not hasattr(self, "issue_detail_label"):
+            return
+        try:
+            宽度 = self.issue_detail_label.winfo_width()
+            if event is not None and hasattr(event, "width"):
+                宽度 = int(event.width)
+            self.issue_detail_label.configure(wraplength=max(120, int(宽度) - 16))
+        except tk.TclError:
+            pass
+
+    def _set_issue_detail_text(self, text):
+        if not hasattr(self, "issue_detail_var"):
+            return
+        self.issue_detail_var.set(str(text or "").strip() or "（当前无选中问题）")
+
     def _refresh_issue_list(self):
         if not hasattr(self, "issue_listbox"):
             return
@@ -1193,6 +1252,7 @@ class 易码IDE:
                 self.issue_listbox.insert(tk.END, "(当前文件无语法/语义问题)")
                 self.issue_listbox.itemconfig(0, foreground="#777777")
                 self.issue_count_var.set("0")
+                self._set_issue_detail_text("（当前文件无语法/语义问题）")
             except tk.TclError:
                 pass
             return
@@ -1213,16 +1273,12 @@ class 易码IDE:
             except tk.TclError:
                 pass
             self.issue_count_var.set("0")
+            self._set_issue_detail_text("（当前文件无语法/语义问题）")
             return
 
         self.issue_count_var.set(str(len(问题列表)))
         for i, item in enumerate(问题列表):
-            if item["level"] == "error":
-                前缀 = "[错]"
-            else:
-                前缀 = "[提]"
-            消息 = str(item.get("message", "")).strip()
-            显示文本 = f"{前缀} L{item['line']} {消息}"
+            显示文本 = self._格式化问题列表项(item)
             self.issue_listbox.insert(tk.END, 显示文本)
             try:
                 颜色 = "#FFAB91" if item["level"] == "error" else "#FFD27F"
@@ -1233,6 +1289,7 @@ class 易码IDE:
         self.issue_listbox.selection_clear(0, tk.END)
         self.issue_listbox.selection_set(0)
         self.issue_listbox.activate(0)
+        self._issue_update_status()
 
     def _get_selected_issue_item(self):
         tab_id = self._get_current_tab_id()
@@ -1250,10 +1307,20 @@ class 易码IDE:
     def _issue_update_status(self, event=None):
         item = self._get_selected_issue_item()
         if not item:
+            self._set_issue_detail_text("（当前无选中问题）")
             return
         级别文本 = "错误" if item.get("level") == "error" else "提示"
         分类文本 = "语法" if item.get("level") == "error" else str(item.get("category", "语义") or "语义")
+        行号 = int(item.get("line") or 1)
+        列号 = item.get("col")
+        消息 = str(item.get("message", "") or "").strip()
         self.status_main_var.set(f"问题列表：{级别文本}/{分类文本}（第 {item['line']} 行）- {item.get('message', '')}")
+        详情文本 = (
+            f"级别：{级别文本}    分类：{分类文本}\n"
+            f"位置：第 {行号} 行" + (f"，第 {列号} 列" if 列号 else "") + "\n"
+            f"详情：{消息 if 消息 else '（无详细信息）'}"
+        )
+        self._set_issue_detail_text(详情文本)
 
     def on_issue_activate(self, event=None):
         item = self._get_selected_issue_item()
@@ -1277,6 +1344,7 @@ class 易码IDE:
                 + (f"，第 {col} 列" if col else "")
                 + f" - {item.get('message', '')}"
             )
+            self._issue_update_status()
         except tk.TclError:
             self.status_main_var.set("问题位置定位失败（行列已变化）")
         return "break"
@@ -1670,14 +1738,33 @@ class 易码IDE:
                 else:
                     已有.add(参数)
 
-        def 收集块内直接赋值名(语句列表):
-            名称集 = set()
+        def 收集块内必定赋值名(语句列表):
+            """
+            收集“执行完该代码块后一定会被赋值”的变量名。
+            这里只做轻量静态近似：顺序语句赋值一定成立；带完整不然分支的如果语句取分支交集。
+            """
+            必定赋值 = set()
             for 语句 in 语句列表 or []:
-                if type(语句).__name__ == "变量设定节点":
+                类型名 = type(语句).__name__
+                if 类型名 == "变量设定节点":
                     名称 = getattr(语句, "名称", "")
                     if 名称:
-                        名称集.add(名称)
-            return 名称集
+                        必定赋值.add(名称)
+                    continue
+
+                if 类型名 == "如果语句节点":
+                    分支结果 = []
+                    for _, 分支代码 in getattr(语句, "条件分支列表", []) or []:
+                        分支结果.append(收集块内必定赋值名(分支代码))
+
+                    否则分支 = getattr(语句, "否则分支列表", None)
+                    if 否则分支 is None:
+                        continue
+
+                    分支结果.append(收集块内必定赋值名(否则分支))
+                    if 分支结果:
+                        必定赋值.update(set.intersection(*分支结果))
+            return 必定赋值
 
         def 分析表达式(节点, 作用域栈, 函数栈, 在图纸体=False):
             if 节点 is None:
@@ -1815,12 +1902,12 @@ class 易码IDE:
                     for 条件, 分支 in getattr(语句, "条件分支列表", []) or []:
                         分析表达式(条件, 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
                         分析代码块(分支, 当前作用域栈, 当前函数栈, 在函数体=在函数体, 循环层级=循环层级, 在图纸体=在图纸体)
-                        分支赋值集合列表.append(收集块内直接赋值名(分支))
+                        分支赋值集合列表.append(收集块内必定赋值名(分支))
                     否则分支 = getattr(语句, "否则分支列表", None)
                     是否有否则 = 否则分支 is not None
                     if 是否有否则:
                         分析代码块(否则分支, 当前作用域栈, 当前函数栈, 在函数体=在函数体, 循环层级=循环层级, 在图纸体=在图纸体)
-                        分支赋值集合列表.append(收集块内直接赋值名(否则分支))
+                        分支赋值集合列表.append(收集块内必定赋值名(否则分支))
                     # 只有在存在“否则”时，才认为变量一定会被赋值；将所有分支共同赋值的变量提升到当前块作用域。
                     if 是否有否则 and 分支赋值集合列表:
                         必定赋值名 = set.intersection(*分支赋值集合列表)
@@ -4877,6 +4964,9 @@ class 易码IDE:
         self._autocomplete_mouse_down = False
 
         idx = self._autocomplete_index_from_event(event)
+        if event is not None and hasattr(event, "y") and idx is None:
+            # 鼠标点在分组标题/空白时，不执行插入。
+            return "break"
         if idx is None:
             idx = self._autocomplete_current_index()
 
@@ -6529,6 +6619,85 @@ class 易码IDE:
         结果 = 结果.strip(" .")
         return 结果 if 结果 else "易码生成软件"
 
+    def _目录在工作区内(self, 目录):
+        try:
+            工作区 = os.path.abspath(self.workspace_dir or "")
+            目标 = os.path.abspath(目录 or "")
+            if not 工作区 or not 目标:
+                return False
+            return os.path.commonpath([工作区, 目标]) == 工作区
+        except Exception:
+            return False
+
+    def _就近主程序入口(self, 当前文件路径):
+        """
+        从当前文件所在目录向上查找最近的主程序.ym（不越过工作区）。
+        返回 (入口路径, 项目目录)；找不到则返回 (None, None)。
+        """
+        if not 当前文件路径:
+            return (None, None)
+        try:
+            当前目录 = os.path.dirname(os.path.abspath(当前文件路径))
+        except Exception:
+            return (None, None)
+
+        while True:
+            if not self._目录在工作区内(当前目录):
+                break
+            候选入口 = os.path.join(当前目录, "主程序.ym")
+            if os.path.isfile(候选入口):
+                return (os.path.abspath(候选入口), 当前目录)
+            上级目录 = os.path.dirname(当前目录)
+            if 上级目录 == 当前目录:
+                break
+            当前目录 = 上级目录
+        return (None, None)
+
+    def _解析导出入口(self, 当前文件路径):
+        """
+        解析导出入口，避免总是落到工作区根目录主程序。
+        规则：
+        1) 当前文件就是主程序.ym：直接作为入口；
+        2) 否则向上查找最近主程序.ym：作为该子项目入口；
+        3) 都找不到时，使用当前文件本身；
+        4) 若当前文件不可用，再回退到工作区根主程序.ym。
+        返回：(源码入口, 源码目录, 软件名称原始)
+        """
+        当前绝对 = None
+        if 当前文件路径 and 当前文件路径 != "未命名代码.ym" and os.path.isfile(当前文件路径):
+            当前绝对 = os.path.abspath(当前文件路径)
+
+        if 当前绝对:
+            if os.path.basename(当前绝对) == "主程序.ym":
+                项目目录 = os.path.dirname(当前绝对)
+                软件名 = os.path.basename(os.path.abspath(项目目录)) or "易码生成软件"
+                return (当前绝对, 项目目录, 软件名)
+
+            就近入口, 项目目录 = self._就近主程序入口(当前绝对)
+            if 就近入口 and 项目目录:
+                # 若只命中“工作区根主程序”，通常是全局工程入口。
+                # 当前文件不在该入口目录时，默认按单文件导出，避免示例文件被错误打成根工程。
+                工作区根 = os.path.normcase(os.path.abspath(self.workspace_dir or ""))
+                项目目录绝对 = os.path.normcase(os.path.abspath(项目目录))
+                当前文件目录绝对 = os.path.normcase(os.path.dirname(当前绝对))
+                if 项目目录绝对 == 工作区根 and 当前文件目录绝对 != 项目目录绝对:
+                    pass
+                else:
+                    软件名 = os.path.basename(os.path.abspath(项目目录)) or "易码生成软件"
+                    return (就近入口, 项目目录, 软件名)
+
+            # 没有主程序时，按单文件导出
+            单文件目录 = os.path.dirname(当前绝对)
+            软件名 = os.path.splitext(os.path.basename(当前绝对))[0] or "易码生成软件"
+            return (当前绝对, 单文件目录, 软件名)
+
+        工作区入口 = os.path.join(self.workspace_dir, "主程序.ym")
+        if os.path.isfile(工作区入口):
+            软件名 = os.path.basename(os.path.abspath(self.workspace_dir)) or "易码生成软件"
+            return (工作区入口, self.workspace_dir, 软件名)
+
+        return (None, self.workspace_dir, "易码生成软件")
+
     def export_exe(self):
         editor = self._get_current_editor()
         tab_id = self._get_current_tab_id()
@@ -6547,22 +6716,11 @@ class 易码IDE:
                 return
             当前文件路径 = self.tabs_data[tab_id]["filepath"]
 
-        项目入口 = os.path.join(self.workspace_dir, "主程序.ym")
-        如果入口存在 = os.path.isfile(项目入口)
-
-        if 如果入口存在:
-            源码入口 = 项目入口
-            软件名称原始 = os.path.basename(os.path.abspath(self.workspace_dir)) or "易码生成软件"
-        elif 当前文件路径 and 当前文件路径 != "未命名代码.ym" and os.path.isfile(当前文件路径):
-            源码入口 = os.path.abspath(当前文件路径)
-            软件名称原始 = os.path.splitext(os.path.basename(源码入口))[0]
-        else:
-            源码入口 = None
-            软件名称原始 = "易码生成软件"
+        源码入口, 源码目录, 软件名称原始 = self._解析导出入口(当前文件路径)
 
         默认图标 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.ico")
         默认软件名 = self._sanitize_export_name(软件名称原始)
-        默认输出目录 = os.path.join(self.workspace_dir, "易码_成品软件")
+        默认输出目录 = os.path.join(源码目录 or self.workspace_dir, "易码_成品软件")
         默认输出路径 = os.path.join(默认输出目录, f"{默认软件名}.exe")
         默认图标路径 = 默认图标 if os.path.isfile(默认图标) else ""
 
@@ -6671,6 +6829,7 @@ class 易码IDE:
             图标变量 = tk.StringVar(value=默认图标路径)
             模式变量 = tk.StringVar(value="windowed")
             结果容器 = {"值": None}
+            默认软件文件名 = f"{默认软件名}.exe"
 
             主框 = tk.Frame(高级窗口, bg=self.theme_toolbar_bg, padx=14, pady=12)
             主框.pack(fill=tk.BOTH, expand=True)
@@ -6777,16 +6936,19 @@ class 易码IDE:
                 if not 输出路径:
                     输出路径 = os.path.join(默认输出目录, f"{软件名}.exe")
                 else:
-                    try:
-                        当前绝对 = os.path.normcase(os.path.abspath(os.path.expanduser(输出路径)))
-                        默认绝对 = os.path.normcase(os.path.abspath(默认输出路径))
-                        if 当前绝对 == 默认绝对:
-                            输出路径 = os.path.join(默认输出目录, f"{软件名}.exe")
-                    except Exception:
-                        pass
-                输出路径 = os.path.abspath(os.path.expanduser(输出路径))
-                if not 输出路径.lower().endswith(".exe"):
-                    输出路径 += ".exe"
+                    输出路径 = os.path.abspath(os.path.expanduser(输出路径))
+                    # 允许用户直接填目录，此时自动补成“目录/软件名.exe”
+                    if os.path.isdir(输出路径) or 输出路径.endswith(("\\", "/")):
+                        输出路径 = os.path.join(输出路径, f"{软件名}.exe")
+                    # 输入的是无后缀文件名时，补齐 .exe
+                    if not 输出路径.lower().endswith(".exe"):
+                        输出路径 += ".exe"
+
+                    # 关键修复：若当前仍是默认文件名，则跟随“软件名称”自动改名
+                    当前文件名 = os.path.basename(输出路径)
+                    if 当前文件名.lower() == 默认软件文件名.lower():
+                        输出目录 = os.path.dirname(输出路径) or 默认输出目录
+                        输出路径 = os.path.join(输出目录, f"{软件名}.exe")
 
                 图标值 = str(图标变量.get() or "").strip()
                 图标值 = os.path.abspath(os.path.expanduser(图标值)) if 图标值 else None
@@ -6869,7 +7031,11 @@ class 易码IDE:
         import tempfile
 
         def 打印进度(文字):
-            self.root.after(0, lambda: self.print_output(文字))
+            文本 = str(文字 or "")
+            # 打包工具内部会先打印一次“中间产物”成功路径，最终路径由编辑器统一打印，避免重复误导。
+            if 文本.startswith("打包成功："):
+                return
+            self.root.after(0, lambda t=文本: self.print_output(t))
 
         def 后台打包():
             原始目录 = os.getcwd()
@@ -6884,16 +7050,16 @@ class 易码IDE:
                 else:
                     打包入口 = 源码入口
 
-                os.chdir(self.workspace_dir)
+                os.chdir(源码目录 or self.workspace_dir)
                 from 易码打包工具 import 编译并打包
 
                 最终路径 = 编译并打包(
                     打包入口,
                     图标路径=打包配置["图标路径"],
                     隐藏黑框=打包配置["隐藏黑框"],
-                    进度打印=打印进度,
+                    进度打字机=打印进度,
                     软件名称=打包配置["软件名称"],
-                    源码目录=self.workspace_dir,
+                    源码目录=源码目录 or self.workspace_dir,
                 )
                 最终绝对路径 = os.path.abspath(最终路径)
                 目标绝对路径 = os.path.abspath(输出路径)

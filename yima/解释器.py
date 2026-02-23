@@ -99,8 +99,11 @@ class 解释器:
         模块Tokens = 词法分析器(源码).分析()
         模块AST = 语法分析器(模块Tokens).解析()
 
-        模块环境 = 环境()
-        模块环境.记录本.update(根环境.记录本)
+        # 模块执行环境采用“父环境继承 + 本地隔离”：
+        # 1) 可直接访问内置能力/主程序全局；
+        # 2) 模块内部赋值不回写到主程序全局；
+        # 3) 导出符号仅来自模块本地记录本，避免混入父环境。
+        模块环境 = 环境(爸爸环境=根环境, 禁止向上赋值=True)
 
         子解释器 = 解释器(严格局部作用域=self.严格局部作用域)
         子解释器.全局环境 = 模块环境
@@ -108,10 +111,7 @@ class 解释器:
         子解释器.设置当前目录(os.path.dirname(绝对路径))
         子解释器.执行代码(模块AST)
 
-        模块导出 = {}
-        for key, value in 模块环境.记录本.items():
-            if key not in 根环境.记录本:
-                模块导出[key] = value
+        模块导出 = dict(模块环境.记录本)
 
         缓存值 = {
             "导出": 模块导出,
@@ -1016,7 +1016,9 @@ class 解释器:
         try:
             self._植入图形库()
         except Exception as e:
-            self._可选能力告警.append(f"图形界面加载失败：{e}")
+            原因 = f"图形界面加载失败：{e}"
+            self._可选能力告警.append(原因)
+            self._植入图形库兜底函数(原因)
             
         # 尝试植入画板引擎 (Turtle)
         try:
@@ -1024,10 +1026,42 @@ class 解释器:
         except Exception as e:
             self._可选能力告警.append(f"画板加载失败：{e}")
 
+    def _植入图形库兜底函数(self, 失败原因: str):
+        from .错误 import 运行报错
+
+        图形能力名 = [
+            "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面",
+            "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
+        ]
+
+        def 生成兜底函数(能力名):
+            def _兜底调用(*参数):
+                # 兜底函数先尝试“延迟恢复”图形能力，恢复成功后立刻转发。
+                try:
+                    self._植入图形库()
+                    真实函数 = self.全局环境.记录本.get(能力名)
+                    if callable(真实函数) and 真实函数 is not _兜底调用:
+                        return 真实函数(*参数)
+                except Exception as 二次错误:
+                    raise 运行报错(f"图形能力【{能力名}】不可用：{二次错误}", 0)
+                raise 运行报错(f"图形能力【{能力名}】不可用：{失败原因}", 0)
+            return _兜底调用
+
+        for 能力名 in 图形能力名:
+            if 能力名 not in self.全局环境.记录本:
+                self.全局环境.记住(能力名, 生成兜底函数(能力名))
+
     def _植入图形库(self):
         import tkinter as tk
-        from tkinter import messagebox, ttk
-        from tkinter import font as tkfont
+        import tkinter.messagebox as messagebox
+        import tkinter.font as tkfont
+        import tkinter.simpledialog as simpledialog
+        try:
+            import tkinter.ttk as ttk
+        except Exception:
+            # 某些打包环境下 `from tkinter import ttk` / `import tkinter.ttk`
+            # 其中一种可能失效，做双通道兜底。
+            from tkinter import ttk
         
         def _创建窗口(标题="易码程序", 宽=400, 高=300):
             窗口 = tk.Tk()
@@ -1074,7 +1108,6 @@ class 解释器:
             messagebox.showinfo(标题, 内容)
             
         def _弹窗输入(标题, 提示=""):
-            from tkinter import simpledialog
             结果 = simpledialog.askstring(标题, 提示)
             return 结果 if 结果 is not None else ""
             
