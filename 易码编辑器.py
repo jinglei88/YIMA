@@ -3614,6 +3614,90 @@ class 易码IDE:
             图纸签名[名称] = self._格式化参数签名(参数列表)
         return 功能签名, 图纸签名
 
+    def _提取图纸成员映射(self, 全文):
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        行列表 = (全文 or "").splitlines()
+        图纸成员映射 = {}
+        图纸成员类型映射 = {}
+        图纸成员签名映射 = {}
+
+        图纸头模式 = re.compile(rf'^\s*定义图纸\s+({标识符模式})\s*(?:\((.*?)\))?')
+        功能头模式 = re.compile(rf'^\s*功能\s+({标识符模式})\s*(?:\((.*?)\))?')
+        自身属性模式 = re.compile(rf'^\s*它的\s+({标识符模式})\b')
+
+        i = 0
+        while i < len(行列表):
+            行文本 = 行列表[i]
+            匹配 = 图纸头模式.match(行文本)
+            if not 匹配:
+                i += 1
+                continue
+
+            图纸名 = str(匹配.group(1) or "").strip()
+            if not 图纸名:
+                i += 1
+                continue
+            图纸缩进 = self._行首缩进宽度(行文本)
+
+            成员集 = set(图纸成员映射.get(图纸名, set()))
+            类型表 = dict(图纸成员类型映射.get(图纸名, {}))
+            签名表 = dict(图纸成员签名映射.get(图纸名, {}))
+
+            i += 1
+            while i < len(行列表):
+                子行 = 行列表[i]
+                去空 = 子行.strip()
+                if not 去空 or 去空.startswith("#"):
+                    i += 1
+                    continue
+
+                子缩进 = self._行首缩进宽度(子行)
+                if 子缩进 <= 图纸缩进:
+                    break
+
+                功能匹配 = 功能头模式.match(子行)
+                if 功能匹配:
+                    名称 = str(功能匹配.group(1) or "").strip()
+                    参数串 = str(功能匹配.group(2) or "")
+                    参数列表 = [p.strip() for p in 参数串.split(",") if p.strip()]
+                    if 名称:
+                        成员集.add(名称)
+                        类型表[名称] = "function"
+                        签名表[名称] = self._格式化参数签名(参数列表)
+                    i += 1
+                    continue
+
+                属性匹配 = 自身属性模式.match(子行)
+                if 属性匹配:
+                    名称 = str(属性匹配.group(1) or "").strip()
+                    if 名称:
+                        成员集.add(名称)
+                        类型表[名称] = "variable"
+                    i += 1
+                    continue
+
+                i += 1
+
+            图纸成员映射[图纸名] = 成员集
+            图纸成员类型映射[图纸名] = 类型表
+            图纸成员签名映射[图纸名] = 签名表
+
+        return 图纸成员映射, 图纸成员类型映射, 图纸成员签名映射
+
+    def _提取对象实例映射(self, 全文):
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        映射 = {}
+        模式 = re.compile(
+            rf'^\s*({标识符模式})\s*=\s*造一个\s+({标识符模式})\b',
+            re.MULTILINE,
+        )
+        for 对象名, 图纸名 in 模式.findall(全文 or ""):
+            对象名 = str(对象名 or "").strip()
+            图纸名 = str(图纸名 or "").strip()
+            if 对象名 and 图纸名:
+                映射[对象名] = 图纸名
+        return 映射
+
     def _行首缩进宽度(self, 行文本):
         行 = str(行文本 or "").replace("\t", "    ")
         return len(行) - len(行.lstrip(" "))
@@ -3847,6 +3931,8 @@ class 易码IDE:
         功能签名, 图纸签名 = self._提取定义签名(内容)
         当前局部变量 = self._提取当前作用域局部变量(内容, 光标行)
         引入别名 = self._提取引入别名映射(内容)
+        图纸成员映射, 图纸成员类型映射, 图纸成员签名映射 = self._提取图纸成员映射(内容)
+        对象实例映射 = self._提取对象实例映射(内容)
         引入模块名 = {str(模块名).strip() for 模块名 in 引入别名.values() if str(模块名).strip()}
         对象成员历史 = {}
         for 对象名, 成员名 in re.findall(rf'({标识符模式})\.({标识符模式})', 内容):
@@ -3894,6 +3980,18 @@ class 易码IDE:
                     for 成员名 in 成员集:
                         合并导入类型(成员名, "member")
                         合并导入签名(成员名, (成员签名 or {}).get(成员名, ""))
+
+        for 对象名, 图纸类型名 in 对象实例映射.items():
+            成员集 = set(图纸成员映射.get(图纸类型名, set()))
+            类型表 = dict(图纸成员类型映射.get(图纸类型名, {}))
+            签名表 = dict(图纸成员签名映射.get(图纸类型名, {}))
+            if not 成员集:
+                continue
+            别名成员映射.setdefault(对象名, set()).update(成员集)
+            if 类型表:
+                别名成员类型映射.setdefault(对象名, {}).update(类型表)
+            if 签名表:
+                别名成员签名映射.setdefault(对象名, {}).update(签名表)
 
         return {
             "局部词": 局部词,

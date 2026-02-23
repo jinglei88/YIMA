@@ -78,6 +78,8 @@ def sample_check() -> None:
         "示例/M10综合测试.ym",
         "示例/M11模块化测试.ym",
         "示例/M12容错测试.ym",
+        "示例/经典案例_图纸对象入门.ym",
+        "示例/经典案例_注册登录_自动测试.ym",
     ]
     for sample in samples:
         run_cmd([PY, "易码.py", sample])
