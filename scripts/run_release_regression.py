@@ -4,8 +4,9 @@
 默认执行：
 1. scripts/run_regression.py
 2. scripts/run_docs_regression.py
-3. M16 自动回归
-4. 打包冒烟（含打包清单机制）
+3. scripts/run_v1_contract_regression.py
+4. M16 自动回归
+5. 打包冒烟（含打包清单机制）
 """
 
 from __future__ import annotations
@@ -80,6 +81,11 @@ def regression_docs() -> None:
     print("[OK] 文档一致性回归通过")
 
 
+def regression_v1_contract() -> None:
+    run_cmd([PY, "scripts/run_v1_contract_regression.py"])
+    print("[OK] v1 契约回归通过")
+
+
 def regression_m16() -> None:
     out = run_cmd([PY, "易码.py", "示例/M16全量能力测试项目/主程序.ym"])
     assert_contains(out, "自动回归全部通过", "M16 自动回归")
@@ -151,6 +157,7 @@ def main() -> int:
     print("=== 易码发布回归开始 ===")
     regression_base()
     regression_docs()
+    regression_v1_contract()
     regression_m16()
     if args.skip_pack:
         print("[SKIP] 已跳过打包冒烟")
