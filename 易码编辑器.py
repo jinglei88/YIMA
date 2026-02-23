@@ -315,6 +315,59 @@ class 易码IDE:
             except tk.TclError:
                 pass
 
+    def _build_toolbar_icon(self, kind="run", size=16, color="#FFFFFF"):
+        """
+        生成顶栏按钮图标（避免依赖外部图片文件）：
+        - run: 右向三角播放图标
+        - export: 盒子+向右导出箭头
+        """
+        size = max(12, int(size))
+        img = tk.PhotoImage(width=size, height=size)
+
+        def put_px(x, y):
+            if 0 <= x < size and 0 <= y < size:
+                img.put(color, (x, y))
+
+        if kind == "run":
+            # 播放图标做得更饱满，避免在高 DPI 下显得过小
+            left = int(size * 0.16)
+            right = int(size * 0.90)
+            top = int(size * 0.10)
+            bottom = int(size * 0.90)
+            mid = (top + bottom) // 2
+            half = max(1, (bottom - top) // 2)
+            for y in range(top, bottom + 1):
+                t = abs(y - mid) / float(half)
+                x_end = int(right - t * (right - left))
+                for x in range(left, x_end + 1):
+                    put_px(x, y)
+            return img
+
+        # export 默认图标：盒子 + 右箭头
+        box_l = int(size * 0.15)
+        box_r = int(size * 0.60)
+        box_t = int(size * 0.18)
+        box_b = int(size * 0.82)
+        for x in range(box_l, box_r + 1):
+            put_px(x, box_t)
+            put_px(x, box_b)
+        for y in range(box_t, box_b + 1):
+            put_px(box_l, y)
+            put_px(box_r, y)
+
+        ay = size // 2
+        ax0 = int(size * 0.44)
+        ax1 = int(size * 0.92)
+        for x in range(ax0, ax1 + 1):
+            put_px(x, ay)
+        # 箭头尖
+        put_px(ax1 - 2, ay - 1)
+        put_px(ax1 - 2, ay + 1)
+        put_px(ax1 - 1, ay - 2)
+        put_px(ax1 - 1, ay + 2)
+        put_px(ax1, ay)
+        return img
+
     def setup_ui(self):
         # 顶部现代化菜单栏（分组 + 主按钮）
         toolbar_shell = tk.Frame(
@@ -330,7 +383,7 @@ class 易码IDE:
         toolbar = tk.Frame(toolbar_shell, bg=self.theme_toolbar_bg, padx=12, pady=8)
         toolbar.pack(fill=tk.X)
 
-        def create_tool_btn(parent, text, cmd, variant="ghost", font=None, compact=False):
+        def create_tool_btn(parent, text, cmd, variant="ghost", font=None, compact=False, width=None, icon_image=None):
             style_map = {
                 "ghost": {
                     "bg": self.theme_toolbar_group_bg,
@@ -368,25 +421,31 @@ class 易码IDE:
             conf = style_map.get(variant, style_map["ghost"])
             pad_x = 8 if compact else 10
             pad_y = 2 if compact else 4
-            btn = tk.Button(
-                parent,
-                text=text,
-                command=cmd,
-                font=font or self.font_ui,
-                bg=conf["bg"],
-                fg=conf["fg"],
-                activebackground=conf["hover_bg"],
-                activeforeground=conf["hover_fg"],
-                relief="flat",
-                borderwidth=0,
-                highlightthickness=1,
-                highlightbackground=conf["border"],
-                highlightcolor=conf["border"],
-                cursor="hand2",
-                padx=pad_x,
-                pady=pad_y,
-                takefocus=0,
-            )
+            btn_kwargs = {
+                "master": parent,
+                "text": text,
+                "command": cmd,
+                "font": font or self.font_ui,
+                "bg": conf["bg"],
+                "fg": conf["fg"],
+                "activebackground": conf["hover_bg"],
+                "activeforeground": conf["hover_fg"],
+                "relief": "flat",
+                "borderwidth": 0,
+                "highlightthickness": 1,
+                "highlightbackground": conf["border"],
+                "highlightcolor": conf["border"],
+                "cursor": "hand2",
+                "padx": pad_x,
+                "pady": pad_y,
+                "takefocus": 0,
+            }
+            if width is not None:
+                btn_kwargs["width"] = int(width)
+            if icon_image is not None:
+                btn_kwargs["image"] = icon_image
+                btn_kwargs["compound"] = tk.LEFT
+            btn = tk.Button(**btn_kwargs)
             def _enter(_e):
                 btn.configure(
                     bg=conf["hover_bg"],
@@ -429,21 +488,41 @@ class 易码IDE:
 
         right_actions = tk.Frame(toolbar, bg=self.theme_toolbar_bg)
         right_actions.pack(side=tk.RIGHT)
+        图标尺寸 = max(14, int(16 * self.dpi_scale))
+        self._toolbar_run_icon = self._build_toolbar_icon("run", size=图标尺寸, color="#FFFFFF")
+        self._toolbar_export_icon = self._build_toolbar_icon("export", size=图标尺寸, color="#FFFFFF")
+
+        # 固定槽位确保右上角两个按钮视觉同宽同高
+        顶栏按钮宽 = max(116, int(124 * self.dpi_scale))
+        顶栏按钮高 = max(30, int(32 * self.dpi_scale))
+
+        运行槽 = tk.Frame(right_actions, bg=self.theme_toolbar_bg, width=顶栏按钮宽, height=顶栏按钮高)
+        运行槽.pack(side=tk.RIGHT, padx=(0, 0))
+        运行槽.pack_propagate(False)
+
+        导出槽 = tk.Frame(right_actions, bg=self.theme_toolbar_bg, width=顶栏按钮宽, height=顶栏按钮高)
+        导出槽.pack(side=tk.RIGHT, padx=(0, 6))
+        导出槽.pack_propagate(False)
+
         create_tool_btn(
-            right_actions,
+            导出槽,
             "导出软件(exe)",
             self.export_exe,
             variant="accent",
-            font=("Microsoft YaHei", 10, "bold"),
-        ).pack(side=tk.RIGHT, ipadx=6)
+            font=("Microsoft YaHei", 9, "bold"),
+            compact=True,
+            icon_image=self._toolbar_export_icon,
+        ).pack(fill=tk.BOTH, expand=True)
 
         create_tool_btn(
-            right_actions,
+            运行槽,
             "运行代码",
             self.run_code,
             variant="run",
-            font=("Microsoft YaHei", 10, "bold"),
-        ).pack(side=tk.RIGHT, padx=(0, 10), ipadx=6)
+            font=("Microsoft YaHei", 9, "bold"),
+            compact=True,
+            icon_image=self._toolbar_run_icon,
+        ).pack(fill=tk.BOTH, expand=True)
 
         create_tool_group("项目", [
             ("新建", self.new_project),
@@ -3011,6 +3090,48 @@ class 易码IDE:
         self.status_main_var.set("已展开当前文件全部折叠块")
         return "break"
 
+    def _extract_fold_line_from_canvas_hit(self, canvas, x, y):
+        try:
+            命中项 = canvas.find_overlapping(x - 1, y - 1, x + 1, y + 1)
+        except tk.TclError:
+            return None
+        for item_id in reversed(命中项):
+            try:
+                tags = canvas.gettags(item_id)
+            except tk.TclError:
+                continue
+            for tag in tags:
+                if str(tag).startswith("fold_line_"):
+                    try:
+                        return int(str(tag).split("_")[-1])
+                    except (TypeError, ValueError):
+                        return None
+        return None
+
+    def _toggle_fold_by_canvas_hit(self, event):
+        canvas = event.widget if event else None
+        if canvas is None:
+            return False
+        line_no = self._extract_fold_line_from_canvas_hit(canvas, event.x, event.y)
+        if not line_no:
+            return False
+        ok = self._toggle_fold_by_line(line_no)
+        if ok:
+            self._refresh_outline()
+            self.status_main_var.set(f"已切换第 {line_no} 行代码块折叠")
+            return True
+        return False
+
+    def _on_guide_canvas_motion(self, event):
+        canvas = event.widget if event else None
+        if canvas is None:
+            return
+        line_no = self._extract_fold_line_from_canvas_hit(canvas, event.x, event.y)
+        try:
+            canvas.configure(cursor="hand2" if line_no else "")
+        except tk.TclError:
+            pass
+
     def _update_line_numbers(self, event=None):
         editor = self._get_current_editor()
         line_numbers = self._get_current_line_numbers()
@@ -3045,6 +3166,8 @@ class 易码IDE:
         
         # 缩进引导线颜色
         guide_colors = ["#333333", "#3B3B5A", "#333333", "#3B3B5A"]
+        功能模式 = re.compile(r'^\s*功能\s+([^\s(（]+)')
+        图纸模式 = re.compile(r'^\s*定义图纸\s+([^\s(（]+)')
         
         try:
             first_line = int(editor.index("@0,0").split(".")[0])
@@ -3059,39 +3182,115 @@ class 易码IDE:
             if not bbox: continue
             
             stripped = line_text.lstrip()
+            声明类型 = None
+            if 功能模式.match(line_text):
+                声明类型 = "功能"
+            elif 图纸模式.match(line_text):
+                声明类型 = "图纸"
             if stripped:
                 indent = len(line_text) - len(stripped)
                 levels = indent // 4
             else:
                 levels = 0  # 空行继承上下文
             
-            line_data.append((line_num, levels, bbox))
+            line_data.append({
+                "line": line_num,
+                "levels": levels,
+                "bbox": bbox,
+                "text": line_text,
+                "kind": 声明类型,
+            })
         
         # 空行继承上一行的缩进级别（让引导线贯穿空行）
         for i in range(len(line_data)):
-            if line_data[i][1] == 0 and i > 0:
-                prev_levels = line_data[i-1][1]
+            if line_data[i]["levels"] == 0 and i > 0:
+                prev_levels = line_data[i-1]["levels"]
                 # 检查下一个有内容的行的缩进
                 next_levels = 0
                 for j in range(i+1, len(line_data)):
-                    if line_data[j][1] > 0:
-                        next_levels = line_data[j][1]
+                    if line_data[j]["levels"] > 0:
+                        next_levels = line_data[j]["levels"]
                         break
                 # 取前后缩进的较小值
                 inherited = min(prev_levels, next_levels) if next_levels > 0 else 0
                 if inherited > 0:
-                    line_data[i] = (line_data[i][0], inherited, line_data[i][2])
+                    line_data[i]["levels"] = inherited
         
         # 绘制引导线
         canvas_width = int(canvas.cget("width"))
-        for line_num, levels, bbox in line_data:
+        for 行信息 in line_data:
+            levels = 行信息["levels"]
             if levels == 0: continue
-            _, y, _, h = bbox
+            _, y, _, h = 行信息["bbox"]
             for lvl in range(levels):
-                x = 5 + lvl * 6
+                x = 24 + lvl * 6
                 if x >= canvas_width - 2: break
                 color = guide_colors[lvl % len(guide_colors)]
                 canvas.create_line(x, y, x, y + h, fill=color, width=1)
+
+        # 绘制“图纸 / 功能”折叠可视化按钮（可点击）
+        folds = self.tabs_data[tab_id].setdefault("folds", {})
+        for 行信息 in line_data:
+            line_num = 行信息["line"]
+            声明类型 = 行信息["kind"]
+            if 声明类型 not in ("功能", "图纸"):
+                continue
+
+            end_line = self._get_block_end_line(editor, line_num)
+            if not end_line:
+                continue
+
+            _, y, _, h = 行信息["bbox"]
+            y_center = int(y + h / 2)
+            collapsed = bool(folds.get(line_num, {}).get("collapsed"))
+            symbol = "▶" if collapsed else "▼"
+
+            if 声明类型 == "功能":
+                base_fill = "#2A5A41"
+                base_outline = "#3C7A5A"
+                label_fg = "#8CE3B4"
+                label_text = "功"
+            else:
+                base_fill = "#304A76"
+                base_outline = "#41659F"
+                label_fg = "#A8C8FF"
+                label_text = "图"
+
+            if collapsed:
+                base_fill = "#6A4A2B"
+                base_outline = "#9B6A3C"
+
+            x_center = 10
+            radius = 7
+            tags = ("fold_marker", f"fold_line_{line_num}", f"fold_kind_{声明类型}")
+
+            canvas.create_oval(
+                x_center - radius,
+                y_center - radius,
+                x_center + radius,
+                y_center + radius,
+                fill=base_fill,
+                outline=base_outline,
+                width=1,
+                tags=tags,
+            )
+            canvas.create_text(
+                x_center,
+                y_center,
+                text=symbol,
+                fill="#E8F2FF",
+                font=("Microsoft YaHei", 8, "bold"),
+                tags=tags,
+            )
+            canvas.create_text(
+                20,
+                y_center,
+                text=label_text,
+                fill=label_fg,
+                font=("Microsoft YaHei", 8, "bold"),
+                anchor="w",
+                tags=tags,
+            )
         
     def _highlight_current_line(self, event=None):
         editor = self._get_current_editor()
@@ -5402,8 +5601,8 @@ class 易码IDE:
         )
         line_numbers.pack(side=tk.LEFT, fill=tk.Y)
         
-        # 缩进引导线画布 (窄带垂直线指示器)
-        guide_canvas = tk.Canvas(tab_frame, width=30, bg=self.theme_gutter_bg, highlightthickness=0, borderwidth=0)
+        # 缩进引导线画布（含 功能/图纸 折叠按钮）
+        guide_canvas = tk.Canvas(tab_frame, width=44, bg=self.theme_gutter_bg, highlightthickness=0, borderwidth=0)
         guide_canvas.pack(side=tk.LEFT, fill=tk.Y)
         
         editor = scrolledtext.ScrolledText(
@@ -5475,8 +5674,18 @@ class 易码IDE:
             左侧控件.bind("<MouseWheel>", 左侧滚轮转发到编辑器)
             左侧控件.bind("<Button-4>", 左侧滚轮转发到编辑器)
             左侧控件.bind("<Button-5>", 左侧滚轮转发到编辑器)
-            左侧控件.bind("<Button-1>", 左侧点击同步光标)
-            左侧控件.bind("<ButtonRelease-1>", 左侧点击同步光标, add="+")
+
+        line_numbers.bind("<Button-1>", 左侧点击同步光标)
+        line_numbers.bind("<ButtonRelease-1>", 左侧点击同步光标, add="+")
+
+        def 引导区点击(event):
+            if self._toggle_fold_by_canvas_hit(event):
+                return "break"
+            return 左侧点击同步光标(event)
+
+        guide_canvas.bind("<Button-1>", 引导区点击)
+        guide_canvas.bind("<Motion>", self._on_guide_canvas_motion, add="+")
+        guide_canvas.bind("<Leave>", lambda e: e.widget.configure(cursor=""), add="+")
         
         # 插入内容
         editor.insert("1.0", content)
