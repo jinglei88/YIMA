@@ -1,4 +1,4 @@
-# d:\易码\易码编辑器.py
+﻿# d:\易码\易码编辑器.py
 #
 # Ownership Marker (Open Source Prep)
 # Author: 景磊 (Jing Lei)
@@ -20,6 +20,8 @@ import re
 import builtins
 import os
 import json
+import inspect
+import importlib
 import importlib.util
 
 # 将当前目录添加到系统路径，确保能找到 yima 包
@@ -32,7 +34,7 @@ from yima.语法分析 import 语法分析器
 class 易码IDE:
     def __init__(self, root):
         self.root = root
-        self.root.title("易码编辑器 - 极简中文编程语言")
+        self.root.title("易码 - 极简中文编程语言")
         
         # 维护多标签状态数据
         # 格式: { tab_id: { "filepath": str, "editor": ScrolledText, "line_numbers": Text } }
@@ -48,9 +50,14 @@ class 易码IDE:
         self._diagnose_after_id = None
         self._outline_after_id = None
         self._semantic_module_cache = {}
+        self._py_module_member_cache = {}
+        self._py_module_member_detail_cache = {}
         self.find_dialog = None
         self.find_var = tk.StringVar(value="")
         self.replace_var = tk.StringVar(value="")
+        self._autocomplete_items = []
+        self._autocomplete_replace_start = None
+        self._autocomplete_replace_end = None
         self._load_project_state()
         self._pair_map = {
             "(": ")",
@@ -92,6 +99,7 @@ class 易码IDE:
         # 字体设定（使用大白话、符合国人习惯的微软雅黑）
         self.font_code = ("Microsoft YaHei", 10)
         self.font_ui = ("Microsoft YaHei", 9)
+        self.font_ui_bold = ("Microsoft YaHei", 10, "bold")
         
         # 现代暗黑专业主题色调 (VS Code 风)
         self.theme_bg = "#1E1E1E"          # 编辑器 & 控制台主背景
@@ -129,9 +137,9 @@ class 易码IDE:
         
         # 智能联想词库 (合并了所有常用字面量、系统函数和代码片段)
         self.autocomplete_words = sorted(list(set(
-            ["功能", "需要", "返回", "叫做", "尝试", "如果出错",
+            ["功能", "返回", "叫做", "尝试", "如果出错",
             "如果", "否则如果", "不然", "当", "的时候", "重复", "次", "遍历", "里的每一个", "停下", "略过",
-            "引入", "用", "中的", "输入", "定义图纸", "造一个", "它的",
+            "引入", "输入", "定义图纸", "造一个", "它的",
             "对", "错", "空"] +
             self.builtin_words +
             list(self.snippets.keys())
@@ -212,6 +220,7 @@ class 易码IDE:
                 "背景颜色", "去", "笔粗", "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画",
                 "刷新画面", "清除", "写字", "开始监听", "绑定按键", "计算距离", "当前X", "当前Y",
             ],
+            "魔法生态库": sorted(self.builtin_words),
         }
 
     def _style_scrolledtext_vbar(self, text_widget, parent=None):
@@ -379,19 +388,19 @@ class 易码IDE:
         right_actions.pack(side=tk.RIGHT)
         create_tool_btn(
             right_actions,
-            "导出软件(EXE)",
+            "导出软件(exe)",
             self.export_exe,
             variant="accent",
             font=("Microsoft YaHei", 10, "bold"),
         ).pack(side=tk.RIGHT, ipadx=6)
 
         create_tool_btn(
-            toolbar,
+            right_actions,
             "运行代码",
             self.run_code,
             variant="run",
             font=("Microsoft YaHei", 10, "bold"),
-        ).pack(side=tk.LEFT, padx=(0, 10), ipadx=6)
+        ).pack(side=tk.RIGHT, padx=(0, 10), ipadx=6)
 
         create_tool_group("项目", [
             ("新建", self.new_project),
@@ -660,7 +669,7 @@ class 易码IDE:
         ).pack(side=tk.LEFT)
         tk.Label(
             out_top,
-            text="用于：运行日志 / 报错定位 / 打包进度（不是程序界面输出）",
+            text="用于：运行日志 / 报错定位",
             font=("Microsoft YaHei", 8),
             bg=self.theme_panel_bg,
             fg="#9FB0C5",
@@ -749,9 +758,16 @@ class 易码IDE:
         self.autocomplete_listbox = tk.Listbox(
             self.root, font=self.font_code, bg=self.theme_sidebar_bg, fg=self.theme_fg, 
             selectbackground="#062F4A", selectforeground="#FFFFFF", 
-            borderwidth=1, relief="solid", highlightthickness=0, height=8
+            borderwidth=1, relief="solid", highlightthickness=0, height=8,
+            activestyle="none", takefocus=0, exportselection=False
         )
         self.autocomplete_listbox.place_forget()
+        self.autocomplete_listbox.bind("<Up>", self._handle_autocomplete_nav)
+        self.autocomplete_listbox.bind("<Down>", self._handle_autocomplete_nav)
+        self.autocomplete_listbox.bind("<Return>", self._accept_autocomplete)
+        self.autocomplete_listbox.bind("<KP_Enter>", self._accept_autocomplete)
+        self.autocomplete_listbox.bind("<Escape>", lambda e: (self._hide_autocomplete(), "break")[1])
+        self.autocomplete_listbox.bind("<ButtonRelease-1>", self._accept_autocomplete)
         self.autocomplete_listbox.bind("<Double-Button-1>", self._accept_autocomplete)
         
         # 初始化界面后：优先恢复上次项目；恢复失败则创建默认代码页
@@ -773,6 +789,9 @@ class 易码IDE:
         target_editor.tag_configure("Comment", foreground="#6A9955", font=(self.font_code[0], self.font_code[1], "italic"))# 幽绿：注释
         target_editor.tag_configure("Boolean", foreground="#4FC1FF", font=(self.font_code[0], self.font_code[1], "bold"))  # 亮蓝：布尔值
         target_editor.tag_configure("Builtin", foreground="#DCDCAA", font=(self.font_code[0], self.font_code[1], "bold"))  # 浅黄：内置函数
+        target_editor.tag_configure("ModuleAlias", foreground="#4FC1FF", font=(self.font_code[0], self.font_code[1], "bold"))  # 模块别名对象（如 系统）
+        target_editor.tag_configure("ObjectRef", foreground="#9CDCFE")  # 普通对象变量（如 工具）
+        target_editor.tag_configure("MemberName", foreground="#FFD27F", font=(self.font_code[0], self.font_code[1], "bold"))  # 点调用成员（如 断言相等）
         target_editor.tag_configure("ErrorLine", background="#51222A")
         target_editor.tag_configure("WarnLine", background="#4D4521")
         target_editor.tag_configure("SearchMatch", background="#3B3A1A", foreground="#F3E99A")
@@ -790,6 +809,9 @@ class 易码IDE:
         target_editor.tag_raise("SearchMatch")
         target_editor.tag_raise("SearchCurrent")
         target_editor.tag_raise("MultiCursorSel")
+        target_editor.tag_raise("ModuleAlias")
+        target_editor.tag_raise("ObjectRef")
+        target_editor.tag_raise("MemberName")
         
     def bind_events(self, editor=None):
         target_editor = editor if editor else self._get_current_editor()
@@ -828,11 +850,12 @@ class 易码IDE:
         
         # 智能联想按键绑定
         target_editor.bind("<KeyRelease>", self._check_autocomplete, add="+")
-        target_editor.bind("<FocusOut>", lambda e: self.autocomplete_listbox.place_forget())
+        target_editor.bind("<FocusOut>", self._on_editor_focus_out)
         target_editor.bind("<Button-1>", self._handle_editor_left_click)
         target_editor.bind("<Up>", self._handle_autocomplete_nav)
         target_editor.bind("<Down>", self._handle_autocomplete_nav)
-        target_editor.bind("<Escape>", lambda e: self.autocomplete_listbox.place_forget())
+        target_editor.bind("<Escape>", lambda e: self._hide_autocomplete())
+        target_editor.bind("<Control-space>", self._trigger_autocomplete)
     # ==========================
     # 编辑器核心组件获取
     # ==========================
@@ -1016,8 +1039,7 @@ class 易码IDE:
             if item["level"] == "error":
                 前缀 = "[错]"
             else:
-                分类 = str(item.get("category", "语义") or "语义")
-                前缀 = "[精引]" if 分类 == "精确引入" else "[提]"
+                前缀 = "[提]"
             消息 = str(item.get("message", "")).strip()
             显示文本 = f"{前缀} L{item['line']} {消息}"
             self.issue_listbox.insert(tk.END, 显示文本)
@@ -1162,10 +1184,6 @@ class 易码IDE:
                 别名 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
                 if 别名:
                     名称集.add(别名)
-            elif 类型名 == "精确引入语句节点":
-                功能名 = getattr(语句, "功能名", "")
-                if 功能名:
-                    名称集.add(功能名)
             elif 类型名 == "重复循环节点":
                 变量名 = getattr(语句, "循环变量名", None)
                 if 变量名:
@@ -1246,35 +1264,59 @@ class 易码IDE:
             语法树 = 语法分析器(词法分析器(代码).分析()).解析()
         except Exception as e:
             错误文本 = f"模块解析失败：{e}"
-            self._semantic_module_cache[绝对路径] = {"mtime": 修改时间, "symbols": set(), "error": 错误文本}
+            self._semantic_module_cache[绝对路径] = {
+                "mtime": 修改时间,
+                "symbols": set(),
+                "symbol_kinds": {},
+                "error": 错误文本,
+            }
             return None, 错误文本
 
         导出符号 = set()
+        导出类型 = {}
+        类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0}
+
+        def 记导出(名称, 类型):
+            if not 名称:
+                return
+            导出符号.add(名称)
+            旧类型 = 导出类型.get(名称, "member")
+            if 类型优先级.get(类型, 0) >= 类型优先级.get(旧类型, 0):
+                导出类型[名称] = 类型
+
         for 语句 in getattr(语法树, "语句列表", []) or []:
             类型名 = type(语句).__name__
             if 类型名 == "变量设定节点":
                 名称 = getattr(语句, "名称", "")
-                if 名称:
-                    导出符号.add(名称)
+                记导出(名称, "variable")
             elif 类型名 == "定义函数节点":
                 名称 = getattr(语句, "函数名", "")
-                if 名称:
-                    导出符号.add(名称)
+                记导出(名称, "function")
             elif 类型名 == "图纸定义节点":
                 名称 = getattr(语句, "图纸名", "")
-                if 名称:
-                    导出符号.add(名称)
+                记导出(名称, "blueprint")
             elif 类型名 == "引入语句节点":
                 名称 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
-                if 名称:
-                    导出符号.add(名称)
-            elif 类型名 == "精确引入语句节点":
-                名称 = getattr(语句, "功能名", "")
-                if 名称:
-                    导出符号.add(名称)
+                记导出(名称, "alias")
 
-        self._semantic_module_cache[绝对路径] = {"mtime": 修改时间, "symbols": set(导出符号), "error": None}
+        self._semantic_module_cache[绝对路径] = {
+            "mtime": 修改时间,
+            "symbols": set(导出符号),
+            "symbol_kinds": dict(导出类型),
+            "error": None,
+        }
         return 导出符号, None
+
+    def _语义读取模块导出详情(self, 模块路径):
+        绝对路径 = os.path.abspath(str(模块路径))
+        符号, 错误 = self._语义读取模块导出(绝对路径)
+        if 错误:
+            return {}, 错误
+        缓存项 = self._semantic_module_cache.get(绝对路径) or {}
+        类型表 = dict(缓存项.get("symbol_kinds", {}))
+        if not 类型表 and 符号:
+            类型表 = {名称: "member" for 名称 in 符号}
+        return 类型表, None
 
     def _语义分析(self, 语法树, tab_id=None):
         警告列表 = []
@@ -1332,9 +1374,6 @@ class 易码IDE:
             if 类型名 == "引入语句节点":
                 名称 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
                 return (名称, "模块别名", getattr(语句, "行号", 1)) if 名称 else None
-            if 类型名 == "精确引入语句节点":
-                名称 = getattr(语句, "功能名", "")
-                return (名称, "精确引入名称", getattr(语句, "行号", 1)) if 名称 else None
             return None
 
         def 检查参数重复(参数列表, 函数名, 行号, 类型名描述):
@@ -1353,44 +1392,6 @@ class 易码IDE:
                     if 名称:
                         名称集.add(名称)
             return 名称集
-
-        def 检查精确引入(语句):
-            模块名 = str(getattr(语句, "模块名", "") or "").strip()
-            功能名 = str(getattr(语句, "功能名", "") or "").strip()
-            行号 = getattr(语句, "行号", 1)
-            if not 模块名 or not 功能名:
-                return
-
-            内置导出 = set(内置模块导出.get(模块名, []) or [])
-            if 模块名 in 内置模块导出:
-                if 功能名 not in 内置导出:
-                    记警告(行号, f"内置模块【{模块名}】不存在名称【{功能名}】。", 分类="精确引入")
-                return
-
-            模块路径 = self._语义定位易码模块(模块名, tab_id=tab_id)
-            if 模块路径:
-                导出符号, 模块错误 = self._语义读取模块导出(模块路径)
-                if 模块错误:
-                    记警告(行号, f"模块【{模块名}】读取失败：{模块错误}", 分类="精确引入")
-                    return
-                if 功能名 not in set(导出符号 or []):
-                    记警告(行号, f"模块【{模块名}】中不存在名称【{功能名}】。", 分类="精确引入")
-                return
-
-            # 不实际导入模块，避免编辑时触发副作用；仅做存在性兜底检查。
-            try:
-                模块规格 = importlib.util.find_spec(模块名)
-            except (ImportError, ValueError, ModuleNotFoundError):
-                模块规格 = None
-
-            if 模块规格 is None:
-                记警告(行号, f"精确引入目标模块【{模块名}】未找到（本地 .ym 与 Python 模块均未命中）。", 分类="精确引入")
-                return
-
-            # 若该 Python 模块已被当前进程加载，则额外检查属性名是否存在。
-            已加载模块 = sys.modules.get(模块名)
-            if 已加载模块 is not None and not hasattr(已加载模块, 功能名):
-                记警告(行号, f"Python 模块【{模块名}】中不存在名称【{功能名}】。", 分类="精确引入")
 
         def 分析表达式(节点, 作用域栈, 函数栈, 在图纸体=False):
             if 节点 is None:
@@ -1641,8 +1642,6 @@ class 易码IDE:
                         记警告(getattr(语句, "行号", 1), "【略过】建议只在循环内部使用。")
                 elif 类型名 == "引入语句节点":
                     continue
-                elif 类型名 == "精确引入语句节点":
-                    检查精确引入(语句)
                 else:
                     分析表达式(语句, 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
 
@@ -1730,6 +1729,84 @@ class 易码IDE:
             return "break"
         return self._auto_indent(event)
 
+    def _handle_tab(self, event=None):
+        if self.autocomplete_listbox.winfo_ismapped():
+            self._accept_autocomplete()
+            return "break"
+        editor = self._get_current_editor()
+        if not editor: return "break"
+        
+        # 1. 如果是多行选区：对每行做缩进
+        try:
+            sel_start = editor.index(tk.SEL_FIRST)
+            sel_end = editor.index(tk.SEL_LAST)
+            start_line = int(sel_start.split('.')[0])
+            end_line = int(sel_end.split('.')[0])
+            # 如果选择恰好到下一行开头，避免多缩进一行
+            if sel_end.split('.')[1] == '0' and start_line != end_line:
+                end_line -= 1
+            for i in range(start_line, end_line + 1):
+                editor.insert(f"{i}.0", "    ")
+            return "break"
+        except tk.TclError:
+            pass
+        
+        # 2. 取当前行文本和光标前词，判断是否触发 Snippet
+        insert_idx = editor.index("insert")
+        line_start = editor.index("insert linestart")
+        line_text_before = editor.get(line_start, insert_idx)
+        current_word_match = re.search(r'[\u4e00-\u9fa5a-zA-Z0-9_]+$', line_text_before)
+        current_word = current_word_match.group(0) if current_word_match else ""
+        
+        # 搜索下一个占位符 ‹...› 的位置 (只在当前行)
+        start_idx = editor.search('\u2039', line_start, f"{line_start} lineend")
+        
+        # 3. 优先级：若光标后没有占位符，并且当前词是 snippet 触发词，则展开 snippet
+        if current_word and current_word in self.snippets:
+            # 判断光标后是否还有占位符
+            after_cursor = editor.search('\u2039', insert_idx, f"{line_start} lineend")
+            if not after_cursor:
+                # 删除触发词
+                word_start_idx = f"insert - {len(current_word)}c"
+                editor.delete(word_start_idx, insert_idx)
+                # 插入 snippet 文本
+                snippet_text = self.snippets[current_word]
+                editor.insert(word_start_idx, snippet_text)
+                # 定位第一个占位符并选中
+                start_idx = editor.search('\u2039', word_start_idx, f"{word_start_idx} lineend")
+                if start_idx:
+                    end_line = editor.get(start_idx, f"{start_idx} lineend")
+                    match_content = re.search(r"\u2039.+?\u203a", end_line)
+                    if match_content:
+                        end_idx = f"{start_idx} + {len(match_content.group(0))}c"
+                        editor.tag_remove("sel", "1.0", "end")
+                        editor.tag_add("sel", start_idx, end_idx)
+                        editor.mark_set("insert", start_idx)  # 将光标移过来
+                        editor.see("insert")
+                
+                self.highlight()
+                return "break" # 阻止默认的 Tab 键行为
+                
+        # 4. 如果没有触发 Snippet，但下文有一个占位符，直接跃迁过去 (多占位符支持)
+        if start_idx:
+            match_content = editor.get(start_idx, f"{start_idx} lineend")
+            match_str = re.search(r"\u2039.+?\u203a", match_content)
+            if match_str:
+                end_idx = f"{start_idx} + {len(match_str.group(0))}c"
+                editor.tag_remove("sel", "1.0", "end")
+                editor.tag_add("sel", start_idx, end_idx)
+                editor.mark_set("insert", start_idx)
+                editor.see("insert")
+                return "break"
+                
+        # 如果什么都不是，当做正常的单个或选区文本替换/缩进处理
+        try:
+            editor.delete(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError: pass
+        
+        editor.insert("insert", "    ")
+        return "break"
+
     def _handle_auto_pairs(self, event):
         editor = self._get_current_editor()
         if not editor or event.widget is not editor:
@@ -1740,6 +1817,36 @@ class 易码IDE:
             return
 
         ch = event.char
+
+        # 中文输入法下的句号自动转英文点：系统。 -> 系统.
+        # 仅在代码区生效；字符串/注释中保留原样，避免影响中文文本输入。
+        if ch in ("。", "．", "｡"):
+            try:
+                prev_tags = editor.tag_names("insert-1c")
+            except tk.TclError:
+                prev_tags = ()
+            try:
+                cur_tags = editor.tag_names("insert")
+            except tk.TclError:
+                cur_tags = ()
+
+            在字符串或注释内 = (
+                ("String" in prev_tags) or ("Comment" in prev_tags)
+                or ("String" in cur_tags) or ("Comment" in cur_tags)
+            )
+            if not 在字符串或注释内:
+                try:
+                    editor.delete(tk.SEL_FIRST, tk.SEL_LAST)
+                except tk.TclError:
+                    pass
+                editor.insert("insert", ".")
+                # 立即触发成员补全，避免中文输入法下必须再按一次键
+                try:
+                    self.root.after_idle(self._check_autocomplete)
+                except Exception:
+                    pass
+                return "break"
+
         if ch in self._pair_map:
             right = self._pair_map[ch]
             try:
@@ -1815,7 +1922,7 @@ class 易码IDE:
         return state["points"]
 
     def _handle_editor_left_click(self, event):
-        self.autocomplete_listbox.place_forget()
+        self._hide_autocomplete()
         editor = self._get_current_editor()
         tab_id, state = self._get_multi_state()
         if not editor or event.widget is not editor or state is None:
@@ -2542,103 +2649,6 @@ class 易码IDE:
         self._highlight_current_line()
         return "break"
         
-    def _handle_tab(self, event=None):
-        editor = self._get_current_editor()
-        if not editor: return "break"
-        
-        import re
-        
-        # 0. 如果存在多行选区，则执行多行整体右移缩进
-        try:
-            sel_start = editor.index(tk.SEL_FIRST)
-            sel_end = editor.index(tk.SEL_LAST)
-            # 区分：如果只是选中行内的一两个字，走替换还是缩进？VS Code 默认选中文本按 Tab 是替换。
-            # 这里按照 VSCode 逻辑：如果选中跨越多行，则是块缩进
-            if sel_start.split('.')[0] != sel_end.split('.')[0]:
-                start_line = int(sel_start.split('.')[0])
-                end_line = int(sel_end.split('.')[0])
-                # 如果最后一行只选中了开头第0列，该行不缩进
-                if sel_end.split('.')[1] == '0':
-                    end_line -= 1
-                for i in range(start_line, end_line + 1):
-                    editor.insert(f"{i}.0", "    ")
-                return "break"
-        except tk.TclError:
-            pass # 没有选中文本
-            
-        # 1. 尝试跳向下一个 [占位符]
-        search_start = editor.index("insert")
-        start_idx = editor.search(r"\u2039.+?\u203a", search_start, stopindex="end", regexp=True)
-        
-        # 2. 获取光标目前所在行的文本内容
-        line_text = editor.get("insert linestart", "insert")
-        words = line_text.strip().split()
-        
-        # 3. 如果前面的词匹配了 Snippet 片段关键字，优先执行 Snippet 展开
-        if words:
-            last_word = words[-1]
-            pure_word_match = re.search(r'([\u4e00-\u9fa5a-zA-Z0-9_]+)$', last_word)
-            actual_word = pure_word_match.group(1) if pure_word_match else last_word
-            
-            if actual_word in self.snippets:
-                template = self.snippets[actual_word]
-                
-                # 删除刚刚输入的那个关键字
-                start_index = f"insert - {len(actual_word)}c"
-                editor.delete(start_index, "insert")
-                
-                # 插入模板文本
-                insert_pos = editor.index("insert")
-                
-                # 我们要为后面的换行保持和上文一样的缩进
-                base_indent = ""
-                for char in line_text:
-                    if char in [' ', '\t']: base_indent += char
-                    else: break
-                
-                # 注入时每行增加基础缩进
-                lines = template.split('\n')
-                indented_template = lines[0] # 第一行不需要加因为光标本来就在那个缩进上
-                for line in lines[1:]:
-                    indented_template += "\n" + base_indent + line
-                
-                editor.insert("insert", indented_template)
-                
-                # 展开后重新搜索后面的第一个占位符进行高亮
-                search_start = insert_pos
-                start_idx = editor.search(r"\u2039.+?\u203a", search_start, stopindex="end", regexp=True)
-                if start_idx:
-                    match_content = editor.get(start_idx, f"{start_idx} lineend")
-                    match_str = re.search(r"\u2039.+?\u203a", match_content)
-                    if match_str:
-                        end_idx = f"{start_idx} + {len(match_str.group(0))}c"
-                        editor.tag_add("sel", start_idx, end_idx)
-                        editor.mark_set("insert", start_idx) # 将光标移过来
-                        editor.see("insert")
-                
-                self.highlight()
-                return "break" # 阻止默认的 Tab 键行为
-                
-        # 4. 如果没有触发 Snippet，但下文有一个占位符，直接跃迁过去 (多占位符支持)
-        if start_idx:
-            match_content = editor.get(start_idx, f"{start_idx} lineend")
-            match_str = re.search(r"\u2039.+?\u203a", match_content)
-            if match_str:
-                end_idx = f"{start_idx} + {len(match_str.group(0))}c"
-                editor.tag_remove("sel", "1.0", "end")
-                editor.tag_add("sel", start_idx, end_idx)
-                editor.mark_set("insert", start_idx)
-                editor.see("insert")
-                return "break"
-                
-        # 如果什么都不是，当做正常的单个或选区文本替换/缩进处理
-        try:
-            editor.delete(tk.SEL_FIRST, tk.SEL_LAST)
-        except tk.TclError: pass
-        
-        editor.insert("insert", "    ")
-        return "break"
-
     def _handle_shift_tab(self, event=None):
         editor = self._get_current_editor()
         if not editor: return "break"
@@ -2674,95 +2684,448 @@ class 易码IDE:
                 
         return "break"
 
-    def _check_autocomplete(self, event=None):
-        # 排除导航键与功能键，保留 BackSpace 以便实时回退补全
-        if event and (event.state & 0x4):
-            self.autocomplete_listbox.place_forget()
+    def _trigger_autocomplete(self, event=None):
+        self._check_autocomplete(event=None)
+        return "break"
+
+    def _on_editor_focus_out(self, event=None):
+        # 点击补全列表时，编辑器会先失焦；延后判断可避免误隐藏
+        self.root.after(10, self._hide_autocomplete_if_focus_lost)
+
+    def _hide_autocomplete_if_focus_lost(self):
+        if not self.autocomplete_listbox.winfo_ismapped():
             return
-        if event and event.keysym in ('Up', 'Down', 'Left', 'Right', 'Return', 'Tab', 'Escape'):
-            if event.keysym == 'Escape':
-                self.autocomplete_listbox.place_forget()
+        焦点控件 = self.root.focus_get()
+        if 焦点控件 is self.autocomplete_listbox:
             return
+        self._hide_autocomplete()
 
-        editor = self._get_current_editor()
-        if not editor:
-            return
+    def _hide_autocomplete(self):
+        self.autocomplete_listbox.place_forget()
+        self._autocomplete_items = []
+        self._autocomplete_replace_start = None
+        self._autocomplete_replace_end = None
 
-        all_text = editor.get("1.0", "end-1c")
-        local_words = set(re.findall(r'[\u4e00-\u9fa5a-zA-Z0-9_]{2,}', all_text))
+    def _autocomplete_match(self, 候选词, 前缀):
+        if not 候选词:
+            return False
+        if 候选词 == 前缀:
+            return False
+        if not 前缀:
+            return True
+        if 候选词.startswith(前缀):
+            return True
+        return len(前缀) >= 2 and (前缀 in 候选词)
 
-        line_text = editor.get("insert linestart", "insert")
-        match = re.search(r'([\u4e00-\u9fa5a-zA-Z0-9_]+)$', line_text)
+    def _提取引入别名映射(self, 全文):
+        映射 = {}
+        模式 = re.compile(
+            r'^\s*引入\s*["“](.+?)["”]\s*叫做\s*([\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*)',
+            re.MULTILINE,
+        )
+        for 模块名, 别名 in 模式.findall(全文 or ""):
+            模块名 = str(模块名).strip()
+            别名 = str(别名).strip()
+            if 模块名 and 别名:
+                映射[别名] = 模块名
+        return 映射
 
-        if not match:
-            self.autocomplete_listbox.place_forget()
-            return
-
-        current_word = match.group(1)
-        if len(current_word) < 1:
-            self.autocomplete_listbox.place_forget()
-            return
-
-        allow_contains = len(current_word) >= 2
-
-        def 是否匹配词(candidate):
-            if candidate == current_word:
-                return False
-            if candidate.startswith(current_word):
-                return True
-            return allow_contains and (current_word in candidate)
-
-        ranking = []
-        for w in self.autocomplete_words:
-            if 是否匹配词(w):
-                base = 0 if w.startswith(current_word) else 2
-                snippet_bonus = -0.2 if w in self.snippets else 0
-                ranking.append((base + snippet_bonus + len(w) / 200.0, "sys", w))
-
-        for w in local_words:
-            if w in self.autocomplete_words:
+    def _跨标签查别名模块(self, 别名, 当前tab_id=None):
+        目标别名 = str(别名 or "").strip()
+        if not 目标别名:
+            return None
+        for tab_id, 数据 in self.tabs_data.items():
+            if 当前tab_id and tab_id == 当前tab_id:
                 continue
-            if 是否匹配词(w):
-                base = 0.8 if w.startswith(current_word) else 2.8
-                ranking.append((base + len(w) / 200.0, "local", w))
+            编辑器 = 数据.get("editor")
+            if not 编辑器:
+                continue
+            try:
+                文本 = 编辑器.get("1.0", "end-1c")
+            except tk.TclError:
+                continue
+            映射 = self._提取引入别名映射(文本)
+            if 目标别名 in 映射:
+                return 映射[目标别名]
+        return None
 
-        if not ranking:
-            self.autocomplete_listbox.place_forget()
-            return
+    def _获取模块补全成员(self, 模块名, tab_id=None):
+        名称 = str(模块名 or "").strip()
+        if not 名称:
+            return set()
 
-        self.autocomplete_listbox.delete(0, tk.END)
-        for _, source, word in sorted(ranking, key=lambda x: (x[0], x[2]))[:18]:
-            if source == "sys":
-                display_text = f"⚡ {word}" if word in self.snippets else f"   {word}"
+        内置导出 = self._builtin_module_exports()
+        if 名称 in 内置导出:
+            return set(内置导出.get(名称, []))
+
+        if 名称 == "魔法生态库":
+            return set(self.builtin_words)
+
+        本地路径 = self._语义定位易码模块(名称, tab_id=tab_id)
+        if 本地路径:
+            导出符号, _ = self._语义读取模块导出(本地路径)
+            return set(导出符号 or set())
+
+        if 名称 in self._py_module_member_cache:
+            return set(self._py_module_member_cache.get(名称, []))
+
+        try:
+            模块对象 = importlib.import_module(名称)
+            成员 = {名字 for 名字 in dir(模块对象) if 名字 and not str(名字).startswith("_")}
+        except Exception:
+            成员 = set()
+        self._py_module_member_cache[名称] = sorted(成员)
+        return 成员
+
+    def _获取模块补全成员详情(self, 模块名, tab_id=None):
+        名称 = str(模块名 or "").strip()
+        if not 名称:
+            return {}
+
+        内置导出 = self._builtin_module_exports()
+        if 名称 in 内置导出:
+            return {成员名: "function" for 成员名 in 内置导出.get(名称, [])}
+
+        if 名称 == "魔法生态库":
+            return {词: "builtin" for 词 in self.builtin_words}
+
+        本地路径 = self._语义定位易码模块(名称, tab_id=tab_id)
+        if 本地路径:
+            类型表, _ = self._语义读取模块导出详情(本地路径)
+            return dict(类型表 or {})
+
+        if 名称 in self._py_module_member_detail_cache:
+            return dict(self._py_module_member_detail_cache.get(名称, {}))
+
+        详情 = {}
+        try:
+            模块对象 = importlib.import_module(名称)
+            for 成员名 in dir(模块对象):
+                成员名 = str(成员名)
+                if not 成员名 or 成员名.startswith("_"):
+                    continue
+                类型 = "member"
+                try:
+                    值 = getattr(模块对象, 成员名)
+                    if inspect.isclass(值):
+                        类型 = "class"
+                    elif callable(值):
+                        类型 = "function"
+                except Exception:
+                    pass
+                详情[成员名] = 类型
+        except Exception:
+            详情 = {}
+
+        self._py_module_member_detail_cache[名称] = dict(详情)
+        return 详情
+
+    def _收集补全上下文(self, 全文, tab_id=None):
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        内容 = 全文 or ""
+        局部词 = set(re.findall(r'[\u4e00-\u9fa5A-Za-z0-9_]{2,}', 内容))
+        功能名 = set(re.findall(rf'^\s*功能\s+({标识符模式})', 内容, re.MULTILINE))
+        图纸名 = set(re.findall(rf'^\s*定义图纸\s+({标识符模式})', 内容, re.MULTILINE))
+        变量名 = set(re.findall(rf'^\s*({标识符模式})\s*=', 内容, re.MULTILINE))
+        引入别名 = self._提取引入别名映射(内容)
+        引入模块名 = {str(模块名).strip() for 模块名 in 引入别名.values() if str(模块名).strip()}
+        对象成员历史 = {}
+        for 对象名, 成员名 in re.findall(rf'({标识符模式})\.({标识符模式})', 内容):
+            if not 对象名 or not 成员名:
+                continue
+            对象成员历史.setdefault(对象名, set()).add(成员名)
+
+        别名成员映射 = {}
+        别名成员类型映射 = {}
+        导入导出平铺 = set()
+        导入导出类型 = {}
+        类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0, "builtin": 0}
+
+        def 合并导入类型(名称, 类型):
+            if not 名称:
+                return
+            当前 = 导入导出类型.get(名称, "member")
+            if 类型优先级.get(类型, 0) >= 类型优先级.get(当前, 0):
+                导入导出类型[名称] = 类型
+
+        for 别名, 模块名 in 引入别名.items():
+            成员详情 = self._获取模块补全成员详情(模块名, tab_id=tab_id)
+            if 成员详情:
+                别名成员类型映射[别名] = dict(成员详情)
+                成员集 = set(成员详情.keys())
+                别名成员映射[别名] = 成员集
+                导入导出平铺.update(成员集)
+                for 成员名, 成员类型 in 成员详情.items():
+                    合并导入类型(成员名, 成员类型)
             else:
-                display_text = f"📌 {word}"
-            self.autocomplete_listbox.insert(tk.END, display_text)
+                成员集 = self._获取模块补全成员(模块名, tab_id=tab_id)
+                if 成员集:
+                    别名成员映射[别名] = set(成员集)
+                    导入导出平铺.update(成员集)
+                    for 成员名 in 成员集:
+                        合并导入类型(成员名, "member")
+
+        return {
+            "局部词": 局部词,
+            "功能名": 功能名,
+            "图纸名": 图纸名,
+            "变量名": 变量名,
+            "引入别名": 引入别名,
+            "引入模块名": 引入模块名,
+            "别名成员映射": 别名成员映射,
+            "别名成员类型映射": 别名成员类型映射,
+            "对象成员历史": 对象成员历史,
+            "导入导出平铺": 导入导出平铺,
+            "导入导出类型": 导入导出类型,
+        }
+
+    def _展示自动补全候选(self, editor, 排序候选):
+        self.autocomplete_listbox.delete(0, tk.END)
+        self._autocomplete_items = []
+        显示文本列表 = []
+
+        标签映射 = {
+            "snippet": "模板",
+            "builtin": "内置",
+            "function": "功能",
+            "blueprint": "图纸",
+            "alias": "模块别名",
+            "module": "模块",
+            "member": "成员",
+            "member_func": "成员-功能",
+            "member_blueprint": "成员-图纸",
+            "member_class": "成员-类",
+            "member_var": "成员-变量",
+            "member_alias": "成员-别名",
+            "imported": "导出",
+            "imported_func": "导出-功能",
+            "imported_blueprint": "导出-图纸",
+            "imported_class": "导出-类",
+            "imported_var": "导出-变量",
+            "imported_alias": "导出-别名",
+            "variable": "变量",
+            "local_word": "上下文",
+        }
+        颜色映射 = {
+            "snippet": "#9CDCFE",
+            "builtin": "#DCDCAA",
+            "function": "#4FC1FF",
+            "blueprint": "#C586C0",
+            "alias": "#B5CEA8",
+            "module": "#CE9178",
+            "member": "#E8E8E8",
+            "member_func": "#4FC1FF",
+            "member_blueprint": "#C586C0",
+            "member_class": "#FFB86C",
+            "member_var": "#7BD88F",
+            "member_alias": "#B5CEA8",
+            "imported": "#FFD27F",
+            "imported_func": "#4FC1FF",
+            "imported_blueprint": "#C586C0",
+            "imported_class": "#FFB86C",
+            "imported_var": "#7BD88F",
+            "imported_alias": "#B5CEA8",
+            "variable": "#7BD88F",
+            "local_word": "#9AA6B2",
+        }
+
+        for 行号, (_, 来源, 词) in enumerate(排序候选[:24]):
+            标签 = 标签映射.get(来源, "上下文")
+            显示文本 = f"    [{标签}]  {词}"
+            self.autocomplete_listbox.insert(tk.END, 显示文本)
+            self._autocomplete_items.append({"insert": 词, "source": 来源})
+            显示文本列表.append(显示文本)
+            try:
+                self.autocomplete_listbox.itemconfig(行号, foreground=颜色映射.get(来源, self.theme_fg))
+            except tk.TclError:
+                pass
+
+        if not self._autocomplete_items:
+            self._hide_autocomplete()
+            return
 
         self.autocomplete_listbox.selection_set(0)
         self.autocomplete_listbox.activate(0)
 
         bbox = editor.bbox("insert")
-        if bbox:
-            x, y, _, height = bbox
-            root_x = editor.winfo_rootx() - self.root.winfo_rootx() + x
-            root_y = editor.winfo_rooty() - self.root.winfo_rooty() + y + height
-            self.autocomplete_listbox.place(x=root_x + 5, y=root_y + 5)
-            self.autocomplete_listbox.lift()
+        if not bbox:
+            self._hide_autocomplete()
+            return
+        x, y, _, height = bbox
+        root_x = editor.winfo_rootx() - self.root.winfo_rootx() + x + 5
+        root_y = editor.winfo_rooty() - self.root.winfo_rooty() + y + height + 5
+
+        try:
+            字体对象 = tkfont.Font(font=self.autocomplete_listbox.cget("font"))
+            最大行宽 = max((字体对象.measure(t) for t in 显示文本列表), default=260)
+            目标宽度 = max(320, 最大行宽 + 28)
+            可用宽度 = max(260, self.root.winfo_width() - root_x - 12)
+            列表宽度 = min(目标宽度, 可用宽度)
+            if root_x + 列表宽度 > self.root.winfo_width() - 8:
+                root_x = max(8, self.root.winfo_width() - 列表宽度 - 8)
+
+            行高 = max(20, 字体对象.metrics("linespace") + 6)
+            可见行数 = min(max(4, len(self._autocomplete_items)), 10)
+            列表高度 = max(140, 行高 * 可见行数 + 6)
+            self.autocomplete_listbox.place(x=root_x, y=root_y, width=列表宽度, height=列表高度)
+        except Exception:
+            self.autocomplete_listbox.place(x=root_x, y=root_y)
+        self.autocomplete_listbox.lift()
+
+    def _check_autocomplete(self, event=None):
+        # 排除 Ctrl 组合键（手动触发除外）
+        if event and (event.state & 0x4):
+            self._hide_autocomplete()
+            return
+        if event and event.keysym in ("Up", "Down", "Left", "Right", "Return", "Tab", "Escape"):
+            if event.keysym == "Escape":
+                self._hide_autocomplete()
+            return
+
+        editor = self._get_current_editor()
+        tab_id = self._get_current_tab_id()
+        if not editor:
+            return
+
+        全文 = editor.get("1.0", "end-1c")
+        行前文本 = editor.get("insert linestart", "insert")
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        上下文 = self._收集补全上下文(全文, tab_id=tab_id)
+
+        点号匹配 = re.search(rf'({标识符模式})\.([\u4e00-\u9fa5A-Za-z0-9_]*)$', 行前文本)
+        if 点号匹配:
+            对象名 = 点号匹配.group(1)
+            成员前缀 = 点号匹配.group(2) or ""
+            成员候选集合 = set(上下文["别名成员映射"].get(对象名, set()))
+            成员候选集合.update(上下文.get("对象成员历史", {}).get(对象名, set()))
+            成员类型映射 = dict(上下文.get("别名成员类型映射", {}).get(对象名, {}))
+
+            if not 成员候选集合:
+                跨标签模块 = self._跨标签查别名模块(对象名, 当前tab_id=tab_id)
+                if 跨标签模块:
+                    跨标签详情 = self._获取模块补全成员详情(跨标签模块, tab_id=tab_id)
+                    if 跨标签详情:
+                        成员候选集合.update(跨标签详情.keys())
+                        成员类型映射.update(跨标签详情)
+                    else:
+                        成员候选集合.update(self._获取模块补全成员(跨标签模块, tab_id=tab_id))
+
+            成员候选 = sorted(成员候选集合)
+            if not 成员候选:
+                self._hide_autocomplete()
+                return
+
+            类型到来源 = {
+                "function": "member_func",
+                "blueprint": "member_blueprint",
+                "class": "member_class",
+                "variable": "member_var",
+                "alias": "member_alias",
+            }
+            排名列表 = []
+            for 成员名 in 成员候选:
+                if not self._autocomplete_match(成员名, 成员前缀):
+                    continue
+                基础分 = 0 if (成员前缀 and 成员名.startswith(成员前缀)) else (0.2 if not 成员前缀 else 1.8)
+                成员类型 = 成员类型映射.get(成员名, "member")
+                成员来源 = 类型到来源.get(成员类型, "member")
+                排名列表.append((基础分 + len(成员名) / 260.0, 成员来源, 成员名))
+
+            if not 排名列表:
+                self._hide_autocomplete()
+                return
+
+            self._autocomplete_replace_start = "insert" if not 成员前缀 else f"insert - {len(成员前缀)}c"
+            self._autocomplete_replace_end = "insert"
+            self._展示自动补全候选(editor, sorted(排名列表, key=lambda x: (x[0], x[2])))
+            return
+
+        普通匹配 = re.search(rf'({标识符模式})$', 行前文本)
+        if not 普通匹配:
+            self._hide_autocomplete()
+            return
+
+        当前词 = 普通匹配.group(1)
+        if len(当前词) < 1:
+            self._hide_autocomplete()
+            return
+
+        候选映射 = {}
+
+        def 加候选(词, 来源, 基础分):
+            if not self._autocomplete_match(词, 当前词):
+                return
+            分数 = 基础分
+            if 词.startswith(当前词):
+                分数 -= 0.4
+            分数 += len(词) / 260.0
+            旧 = 候选映射.get(词)
+            if 旧 is None or 分数 < 旧[0]:
+                候选映射[词] = (分数, 来源, 词)
+
+        for 词 in self.autocomplete_words:
+            if 词 in self.snippets:
+                加候选(词, "snippet", -0.2)
+            else:
+                加候选(词, "builtin", 0.2)
+
+        for 词 in 上下文["功能名"]:
+            加候选(词, "function", 0.1)
+        for 词 in 上下文["图纸名"]:
+            加候选(词, "blueprint", 0.12)
+        for 词 in 上下文["变量名"]:
+            加候选(词, "variable", 0.45)
+        for 词 in 上下文["引入别名"].keys():
+            加候选(词, "alias", 0.18)
+        for 词 in 上下文.get("引入模块名", set()):
+            加候选(词, "module", 0.28)
+        导入类型 = 上下文.get("导入导出类型", {})
+        导入类型到来源 = {
+            "function": "imported_func",
+            "blueprint": "imported_blueprint",
+            "class": "imported_class",
+            "variable": "imported_var",
+            "alias": "imported_alias",
+        }
+        for 词 in 上下文["导入导出平铺"]:
+            词类型 = 导入类型.get(词, "member")
+            加候选(词, 导入类型到来源.get(词类型, "imported"), 0.52)
+        for 词 in 上下文["局部词"]:
+            if 词 not in self.autocomplete_words:
+                加候选(词, "local_word", 0.7)
+
+        if not 候选映射:
+            self._hide_autocomplete()
+            return
+
+        self._autocomplete_replace_start = f"insert - {len(当前词)}c"
+        self._autocomplete_replace_end = "insert"
+        排序后 = sorted(候选映射.values(), key=lambda x: (x[0], x[2]))
+        self._展示自动补全候选(editor, 排序后)
 
     def _handle_autocomplete_nav(self, event):
         if not self.autocomplete_listbox.winfo_ismapped():
             return # 交给系统默认处理
-            
+
+        总数 = self.autocomplete_listbox.size()
+        if 总数 <= 0:
+            return "break"
+
         current_selection = self.autocomplete_listbox.curselection()
-        if not current_selection: return "break"
-        
-        idx = current_selection[0]
-        self.autocomplete_listbox.selection_clear(idx)
+        if current_selection:
+            idx = int(current_selection[0])
+        else:
+            try:
+                idx = int(self.autocomplete_listbox.index("active"))
+            except tk.TclError:
+                idx = 0
+            idx = max(0, min(总数 - 1, idx))
+        self.autocomplete_listbox.selection_clear(0, tk.END)
         
         if event.keysym == 'Up':
             idx = max(0, idx - 1)
         elif event.keysym == 'Down':
-            idx = min(self.autocomplete_listbox.size() - 1, idx + 1)
+            idx = min(总数 - 1, idx + 1)
             
         self.autocomplete_listbox.selection_set(idx)
         self.autocomplete_listbox.activate(idx)
@@ -2775,34 +3138,74 @@ class 易码IDE:
             return "break" # 阻止真实回车换行发生
 
     def _accept_autocomplete(self, event=None):
-        if not self.autocomplete_listbox.winfo_ismapped(): return
-        
-        selection = self.autocomplete_listbox.curselection()
-        if not selection: return
-        
-        # 拿到选中的词 (去掉前面的修饰符)
-        raw_text = self.autocomplete_listbox.get(selection[0])
-        selected_word = raw_text.split(" ", 1)[-1].strip()
-        
+        if not self.autocomplete_listbox.winfo_ismapped():
+            return
+
+        idx = None
+        if event is not None and hasattr(event, "y"):
+            try:
+                idx = int(self.autocomplete_listbox.nearest(event.y))
+            except tk.TclError:
+                idx = None
+        if idx is None:
+            selection = self.autocomplete_listbox.curselection()
+            if selection:
+                idx = int(selection[0])
+            else:
+                try:
+                    idx = int(self.autocomplete_listbox.index("active"))
+                except tk.TclError:
+                    idx = 0
+
+        if idx < 0 or idx >= len(self._autocomplete_items):
+            self._hide_autocomplete()
+            return
+
+        当前候选 = self._autocomplete_items[idx]
+        selected_word = str(当前候选.get("insert", "")).strip()
+        selected_source = str(当前候选.get("source", "")).strip()
+        if not selected_word:
+            self._hide_autocomplete()
+            return
+
         editor = self._get_current_editor()
-        if not editor: return
-        
-        line_text = editor.get("insert linestart", "insert")
-        import re
-        match = re.search(r'([\u4e00-\u9fa5a-zA-Z0-9_]+)$', line_text)
-        
-        if match:
-            current_word = match.group(1)
-            # 删除光标前已敲出的残字
-            start_index = f"insert - {len(current_word)}c"
-            editor.delete(start_index, "insert")
-            # 补入全词
-            editor.insert("insert", selected_word)
-            
-            # 高亮一下当前代码
+        if not editor:
+            self._hide_autocomplete()
+            return
+
+        start_index = self._autocomplete_replace_start
+        end_index = self._autocomplete_replace_end or "insert"
+        if not start_index:
+            line_text = editor.get("insert linestart", "insert")
+            match = re.search(r'([\u4e00-\u9fa5A-Za-z0-9_]+)$', line_text)
+            if match:
+                start_index = f"insert - {len(match.group(1))}c"
+            else:
+                start_index = "insert"
+
+        try:
+            start_pos = editor.index(start_index)
+            end_pos = editor.index(end_index)
+            editor.delete(start_pos, end_pos)
+            editor.insert(start_pos, selected_word)
+            末尾位置 = editor.index(f"{start_pos} + {len(selected_word)}c")
+
+            自动补括号来源 = {"function", "member", "member_func", "imported", "imported_func"}
+            if selected_source in 自动补括号来源:
+                下一个字符 = editor.get(末尾位置, f"{末尾位置}+1c")
+                if 下一个字符 != "(":
+                    editor.insert(末尾位置, "()")
+                    editor.mark_set("insert", f"{末尾位置}+1c")
+                else:
+                    editor.mark_set("insert", f"{末尾位置}+1c")
+            else:
+                editor.mark_set("insert", 末尾位置)
+
             self.highlight()
-            
-        self.autocomplete_listbox.place_forget()
+        except tk.TclError:
+            pass
+
+        self._hide_autocomplete()
 
     def bind_global_shortcuts(self):
         self.root.bind("<Control-s>", self._shortcut_save)
@@ -3248,7 +3651,7 @@ class 易码IDE:
         code = editor.get("1.0", "end-1c")
         
         # 先清除所有高亮
-        for tag in ["Define", "Keyword", "Operator", "String", "Number", "Comment", "Boolean", "Builtin"]:
+        for tag in ["Define", "Keyword", "Operator", "String", "Number", "Comment", "Boolean", "Builtin", "ModuleAlias", "ObjectRef", "MemberName"]:
             editor.tag_remove(tag, "1.0", "end")
             
         # 1. 高亮数字 (包含小数)
@@ -3271,12 +3674,12 @@ class 易码IDE:
             
         # 4. 高亮关键字与操作符
         # Define 控制结构定义
-        defines = ["功能", "需要", "返回", "叫做", "尝试", "如果出错", "定义图纸", "造一个", "它的"]
+        defines = ["功能", "返回", "叫做", "尝试", "如果出错", "定义图纸", "造一个", "它的"]
         
         # Keyword 流程控制
         keywords = ["如果", "就", "否则如果", "不然",
                    "当", "的时候", "重复", "次", "遍历", "里的每一个",
-                   "停下", "略过", "引入", "用", "中的"]
+                   "停下", "略过", "引入"]
                    
         operators = ["而且", "并且", "或者", "取反", "!",
                      "+", "-", "*", "/", "%", "**", "//", "==", "!=", ">", "<", ">=", "<="]
@@ -3332,6 +3735,39 @@ class 易码IDE:
         apply_tags(booleans, "Boolean")
         apply_tags(builtins_list, "Builtin")
 
+        # 5. 高亮对象成员调用：对象.成员
+        #    - 模块别名对象（来自 引入 ... 叫做 ...）用 ModuleAlias
+        #    - 其他对象名用 ObjectRef
+        #    - 点后的成员名统一用 MemberName
+        别名集合 = set(self._提取引入别名映射(code).keys())
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+
+        def 在字符串或注释内(索引):
+            标签 = editor.tag_names(索引)
+            return ("String" in 标签) or ("Comment" in 标签)
+
+        for match in re.finditer(rf'({标识符模式})\.({标识符模式})', code):
+            obj_start = f"1.0 + {match.start(1)}c"
+            obj_end = f"1.0 + {match.end(1)}c"
+            member_start = f"1.0 + {match.start(2)}c"
+            member_end = f"1.0 + {match.end(2)}c"
+            if 在字符串或注释内(obj_start):
+                continue
+            obj_name = match.group(1)
+            obj_tag = "ModuleAlias" if obj_name in 别名集合 else "ObjectRef"
+            editor.tag_add(obj_tag, obj_start, obj_end)
+            editor.tag_add("MemberName", member_start, member_end)
+
+        # 6. 高亮正在输入的对象点号（如 系统.）
+        for match in re.finditer(rf'({标识符模式})\.(?=\s|$|[)\],])', code):
+            obj_start = f"1.0 + {match.start(1)}c"
+            obj_end = f"1.0 + {match.end(1)}c"
+            if 在字符串或注释内(obj_start):
+                continue
+            obj_name = match.group(1)
+            obj_tag = "ModuleAlias" if obj_name in 别名集合 else "ObjectRef"
+            editor.tag_add(obj_tag, obj_start, obj_end)
+
     def print_output(self, text, is_error=False):
         try:
             self.output.config(state=tk.NORMAL)
@@ -3348,8 +3784,6 @@ class 易码IDE:
         self.print_output("========================================")
         self.print_output("【易码调试控制台】")
         self.print_output("作者：景磊")
-        self.print_output("用途：显示运行日志、错误定位、打包进度。")
-        self.print_output("说明：程序界面的文字，请看你创建的窗口/弹窗，不在此处。")
         self.print_output("联系 QQ：395842972 / 97777315")
         self.print_output("========================================")
 
@@ -3458,21 +3892,53 @@ class 易码IDE:
                     same_tree = os.path.commonpath([root, preferred_abs]) == root
                 except ValueError:
                     same_tree = False
-                if same_tree:
+                if same_tree and os.path.basename(preferred_abs) == "主程序.ym" and os.path.isfile(preferred_abs):
                     return preferred_abs
 
-        for filename in ["主程序.ym", "main.ym"]:
-            candidate = os.path.join(root, filename)
-            if os.path.isfile(candidate):
-                return candidate
+        candidate = os.path.join(root, "主程序.ym")
+        return candidate if os.path.isfile(candidate) else None
 
+    def _初始化标准项目结构(self, project_dir):
+        项目根目录 = self._normalize_project_dir(project_dir)
+        if not 项目根目录:
+            return False
         try:
-            ym_files = sorted([name for name in os.listdir(root) if name.endswith(".ym")])
-            if ym_files:
-                return os.path.join(root, ym_files[0])
-        except Exception:
-            return None
-        return None
+            os.makedirs(项目根目录, exist_ok=True)
+            os.makedirs(os.path.join(项目根目录, "界面"), exist_ok=True)
+            os.makedirs(os.path.join(项目根目录, "业务"), exist_ok=True)
+            os.makedirs(os.path.join(项目根目录, "数据"), exist_ok=True)
+
+            模板文件 = {
+                os.path.join(项目根目录, "主程序.ym"):
+                    '# 易码标准项目入口\n'
+                    '引入 "界面/界面层.ym" 叫做 界面\n'
+                    '界面.启动()\n',
+                os.path.join(项目根目录, "界面", "界面层.ym"):
+                    '# 界面层：只负责展示与交互\n'
+                    '引入 "../业务/业务层.ym" 叫做 业务\n\n'
+                    '功能 启动()\n'
+                    '    显示 "界面层已启动"\n'
+                    '    业务.运行()\n',
+                os.path.join(项目根目录, "业务", "业务层.ym"):
+                    '# 业务层：负责规则与流程\n'
+                    '引入 "../数据/数据层.ym" 叫做 数据\n\n'
+                    '功能 运行()\n'
+                    '    显示 "业务层执行中"\n'
+                    '    数据.初始化()\n',
+                os.path.join(项目根目录, "数据", "数据层.ym"):
+                    '# 数据层：负责存储与读取\n'
+                    '功能 初始化()\n'
+                    '    显示 "数据层已就绪"\n',
+            }
+
+            for 文件路径, 内容 in 模板文件.items():
+                if not os.path.exists(文件路径):
+                    with open(文件路径, "w", encoding="utf-8") as f:
+                        f.write(内容)
+            return True
+        except Exception as e:
+            messagebox.showerror("项目初始化失败", f"无法创建标准项目结构：{e}")
+            return False
 
     def _switch_project(self, dir_path, preferred_file=None, create_blank_if_empty=True):
         project_dir = self._normalize_project_dir(dir_path)
@@ -3496,8 +3962,21 @@ class 易码IDE:
                 self._remember_project(project_dir)
         else:
             if create_blank_if_empty:
-                self.clear_code()
-                self._remember_project(project_dir, self._current_open_file())
+                if self._初始化标准项目结构(project_dir):
+                    标准入口 = os.path.join(project_dir, "主程序.ym")
+                    try:
+                        with open(标准入口, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        self._create_editor_tab(标准入口, content)
+                        self._remember_project(project_dir, 标准入口)
+                        self.status_main_var.set("已按标准结构初始化项目：主程序 + 界面/业务/数据")
+                    except Exception as e:
+                        self.print_output(f"❌ 打开标准入口失败：{e}")
+                        self._create_editor_tab("未命名代码.ym", "")
+                        self._remember_project(project_dir)
+                else:
+                    self._create_editor_tab("未命名代码.ym", "")
+                    self._remember_project(project_dir)
             else:
                 self._create_editor_tab("未命名代码.ym", "")
                 self._remember_project(project_dir)
@@ -4223,6 +4702,13 @@ class 易码IDE:
         if dir_path:
             if not self._confirm_close_all_dirty_tabs():
                 return
+            主程序路径 = os.path.join(dir_path, "主程序.ym")
+            if not os.path.isfile(主程序路径):
+                if not messagebox.askyesno(
+                    "缺少主程序.ym",
+                    "该目录不符合易码标准项目结构（缺少 主程序.ym）。\n是否立即按标准结构初始化？",
+                ):
+                    return
             self._switch_project(dir_path, create_blank_if_empty=True)
 
     def new_project(self):
@@ -4231,340 +4717,409 @@ class 易码IDE:
         if dir_path:
             if not self._confirm_close_all_dirty_tabs():
                 return
-            # 检查文件夹是否为空
             if os.listdir(dir_path):
-                if not messagebox.askyesno("提示", "这个文件夹里好像已经有东西了，确定要在这里建易码项目吗？\n（最好选择一个完全空的文件夹哦）"):
+                if not messagebox.askyesno(
+                    "确认初始化",
+                    "这个目录不是空的。\n是否继续初始化标准结构（仅创建缺失文件，不覆盖现有文件）？",
+                ):
                     return
-            
-            main_file = os.path.join(dir_path, "主程序.ym")
-            if not os.path.exists(main_file):
-                try:
-                    with open(main_file, "w", encoding="utf-8") as f:
-                        f.write("# 在这里开始你的易码大作\n显示 \"你好，易码世界！\"\n")
-                except Exception as e:
-                    messagebox.showerror("创建失败", f"无法创建文件：{e}")
-                    return
-
-            self._switch_project(dir_path, preferred_file=main_file, create_blank_if_empty=True)
+            if not self._初始化标准项目结构(dir_path):
+                return
+            self._switch_project(dir_path, preferred_file=os.path.join(dir_path, "主程序.ym"), create_blank_if_empty=True)
 
     def export_exe(self):
         editor = self._get_current_editor()
-        if not editor: return
+        tab_id = self._get_current_tab_id()
+        if not editor or not tab_id or tab_id not in self.tabs_data:
+            return
+
         源码内容 = editor.get("1.0", "end-1c")
         if not 源码内容.strip():
             messagebox.showwarning("无法打包", "代码是空的，先写点啥吧！")
             return
 
-        # 创建一个自定义的打包设置对话框
-        dlg = tk.Toplevel(self.root)
-        dlg.title("📦 导出易码软件")
-        # 居中显示
-        win_w = int(500 * self.dpi_scale)
-        win_h = int(410 * self.dpi_scale)
-        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win_w // 2)
-        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win_h // 2)
-        dlg.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        dlg.resizable(False, False)
-        dlg.configure(bg=self.theme_sidebar_bg)
-        dlg.transient(self.root) # 保持在主窗口前
-        dlg.grab_set() # 独占焦点
+        当前文件路径 = self.tabs_data[tab_id]["filepath"]
+        if self.tabs_data[tab_id].get("dirty"):
+            if not self.save_file(show_message=False):
+                messagebox.showwarning("打包取消", "请先保存当前文件后再打包。")
+                return
+            当前文件路径 = self.tabs_data[tab_id]["filepath"]
 
-        # 标题区域
-        tk.Label(dlg, text="生成独立的 Windows 软件 (EXE)", font=("Microsoft YaHei", 14, "bold"), bg=self.theme_sidebar_bg, fg="#FFFFFF").pack(pady=(20, 10))
+        项目入口 = os.path.join(self.workspace_dir, "主程序.ym")
+        如果入口存在 = os.path.isfile(项目入口)
 
-        form_frame = tk.Frame(dlg, bg=self.theme_sidebar_bg)
-        form_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-
-        tab_id = self._get_current_tab_id()
-        当前文件名 = "我的易码软件"
-        if tab_id and self.tabs_data[tab_id]["filepath"] != "未命名代码.ym":
-            当前文件名, _ = os.path.splitext(os.path.basename(self.tabs_data[tab_id]["filepath"]))
+        if 如果入口存在:
+            源码入口 = 项目入口
+            软件名称原始 = os.path.basename(os.path.abspath(self.workspace_dir)) or "易码生成软件"
+        elif 当前文件路径 and 当前文件路径 != "未命名代码.ym" and os.path.isfile(当前文件路径):
+            源码入口 = os.path.abspath(当前文件路径)
+            软件名称原始 = os.path.splitext(os.path.basename(源码入口))[0]
+        else:
+            源码入口 = None
+            软件名称原始 = "易码生成软件"
 
         def 清理软件名(名称):
             结果 = str(名称 or "").strip()
             if not 结果:
-                结果 = "我的易码软件"
+                结果 = "易码生成软件"
             for 坏字符 in '<>:"/\\|?*':
                 结果 = 结果.replace(坏字符, "_")
             结果 = 结果.strip(" .")
-            return 结果 if 结果 else "我的易码软件"
+            return 结果 if 结果 else "易码生成软件"
 
-        # 1. 软件名称
-        tk.Label(form_frame, text="软件名称：", font=self.font_ui, bg=self.theme_sidebar_bg, fg=self.theme_fg).grid(row=0, column=0, sticky="e", pady=10)
-        app_name_var = tk.StringVar(value=当前文件名)
-        app_name_entry = tk.Entry(form_frame, textvariable=app_name_var, width=30, font=self.font_ui, bg=self.theme_bg, fg=self.theme_fg, insertbackground="#CCCCCC", relief="flat", highlightthickness=1, highlightbackground=self.theme_sash, highlightcolor="#0E639C")
-        app_name_entry.grid(row=0, column=1, sticky="w", pady=10, ipady=3)
+        默认图标 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.ico")
+        默认软件名 = 清理软件名(软件名称原始)
+        默认输出目录 = os.path.join(self.workspace_dir, "易码_成品软件")
+        默认输出路径 = os.path.join(默认输出目录, f"{默认软件名}.exe")
+        默认图标路径 = 默认图标 if os.path.isfile(默认图标) else ""
 
-        # 2. 保存位置
-        tk.Label(form_frame, text="存到哪里：", font=self.font_ui, bg=self.theme_sidebar_bg, fg=self.theme_fg).grid(row=1, column=0, sticky="e", pady=10)
-        path_var = tk.StringVar()
-        path_entry = tk.Entry(form_frame, textvariable=path_var, width=30, font=self.font_ui, bg=self.theme_bg, fg=self.theme_fg, insertbackground="#CCCCCC", relief="flat", highlightthickness=1, highlightbackground=self.theme_sash, highlightcolor="#0E639C")
-        path_entry.grid(row=1, column=1, sticky="w", pady=10, ipady=3)
+        def 选择导出模式():
+            模式窗口 = tk.Toplevel(self.root)
+            模式窗口.title("导出模式")
+            模式窗口.configure(bg=self.theme_toolbar_bg)
+            模式窗口.resizable(False, False)
+            模式窗口.transient(self.root)
+            模式窗口.grab_set()
+            标题字体 = getattr(self, "font_ui_bold", self.font_ui)
 
-        def 默认输出路径(名称):
-            return os.path.join(os.path.expanduser("~"), "Desktop", f"{清理软件名(名称)}.exe")
+            结果容器 = {"值": None}
 
-        def 解析保存目录(路径文本):
-            文本 = str(路径文本 or "").strip()
-            if not 文本:
-                return os.path.join(os.path.expanduser("~"), "Desktop")
-            文本 = os.path.abspath(os.path.expanduser(文本))
-            if 文本.lower().endswith(".exe"):
-                return os.path.dirname(文本) or os.path.join(os.path.expanduser("~"), "Desktop")
-            if os.path.isdir(文本):
-                return 文本
-            # 没有后缀时按目录理解，便于直接输入新目录名
-            if os.path.splitext(文本)[1] == "":
-                return 文本
-            return os.path.dirname(文本) or os.path.join(os.path.expanduser("~"), "Desktop")
+            def 设定模式(值):
+                结果容器["值"] = 值
+                模式窗口.destroy()
 
-        def 刷新目标路径():
-            保存目录 = 解析保存目录(path_var.get())
-            软件名文件 = f"{清理软件名(app_name_var.get())}.exe"
-            path_var.set(os.path.join(保存目录, 软件名文件))
+            主框 = tk.Frame(模式窗口, bg=self.theme_toolbar_bg, padx=16, pady=14)
+            主框.pack(fill=tk.BOTH, expand=True)
 
-        path_var.set(默认输出路径(当前文件名))
-        app_name_var.trace_add("write", lambda *_: 刷新目标路径())
+            tk.Label(
+                主框,
+                text="请选择导出方式：",
+                bg=self.theme_toolbar_bg,
+                fg=self.theme_toolbar_fg,
+                font=标题字体,
+                anchor="w",
+            ).pack(anchor="w")
+            tk.Label(
+                主框,
+                text="快速版：一键打包（推荐）\n高级版：自定义名称/路径/图标/运行模式",
+                bg=self.theme_toolbar_bg,
+                fg=self.theme_toolbar_fg,
+                font=self.font_ui,
+                justify="left",
+                anchor="w",
+                pady=8,
+            ).pack(anchor="w", fill=tk.X)
 
-        def 选择保存目录():
-            初始目录 = 解析保存目录(path_var.get())
-            目录 = filedialog.askdirectory(title="选择保存目录", initialdir=初始目录, parent=dlg)
-            if 目录:
-                path_var.set(os.path.join(目录, f"{清理软件名(app_name_var.get())}.exe"))
+            按钮框 = tk.Frame(主框, bg=self.theme_toolbar_bg)
+            按钮框.pack(fill=tk.X, pady=(8, 0))
 
-        路径侧栏 = tk.Frame(form_frame, bg=self.theme_sidebar_bg)
-        路径侧栏.grid(row=1, column=2, padx=(10, 0), sticky="w")
-        tk.Button(
-            路径侧栏,
-            text="选择目录",
-            command=选择保存目录,
-            font=("Microsoft YaHei", 8),
-            bg=self.theme_toolbar_bg,
-            fg=self.theme_fg,
-            activebackground="#505050",
-            activeforeground="#FFFFFF",
-            relief="flat",
-            borderwidth=0,
-            cursor="hand2",
-            padx=10,
-            pady=2,
-        ).pack(anchor="w")
-        tk.Label(
-            路径侧栏,
-            text="文件名将按“软件名称”自动生成",
-            font=("Microsoft YaHei", 8),
-            bg=self.theme_sidebar_bg,
-            fg="#8FA5B5",
-        ).pack(anchor="w", pady=(4, 0))
+            tk.Button(
+                按钮框,
+                text="快速版",
+                command=lambda: 设定模式("quick"),
+                font=self.font_ui,
+                width=10,
+                bg="#1E7BC8",
+                fg="#FFFFFF",
+            ).pack(side=tk.LEFT)
+            tk.Button(
+                按钮框,
+                text="高级版",
+                command=lambda: 设定模式("advanced"),
+                font=self.font_ui,
+                width=10,
+            ).pack(side=tk.LEFT, padx=(8, 0))
+            tk.Button(
+                按钮框,
+                text="取消",
+                command=lambda: 设定模式(None),
+                font=self.font_ui,
+                width=10,
+            ).pack(side=tk.RIGHT)
 
-        # 3. 个性图标
-        tk.Label(form_frame, text="个性图标：", font=self.font_ui, bg=self.theme_sidebar_bg, fg=self.theme_fg).grid(row=2, column=0, sticky="e", pady=10)
-        icon_var = tk.StringVar()
-        icon_entry = tk.Entry(form_frame, textvariable=icon_var, width=30, font=self.font_ui, bg=self.theme_bg, fg=self.theme_fg, insertbackground="#CCCCCC", relief="flat", highlightthickness=1, highlightbackground=self.theme_sash, highlightcolor="#0E639C")
-        icon_entry.insert(0, "(留空则使用默认易码图标)")
-        icon_entry.config(foreground="#666666")
-        icon_entry.grid(row=2, column=1, sticky="w", pady=10, ipady=3)
-        
-        def on_icon_focus_in(e):
-            if icon_entry.get() == "(留空则使用默认易码图标)":
-                icon_entry.delete(0, "end")
-                icon_entry.config(foreground=self.theme_fg)
-                
-        def on_icon_focus_out(e):
-            if not icon_entry.get():
-                icon_entry.insert(0, "(留空则使用默认易码图标)")
-                icon_entry.config(foreground="#666666")
-                
-        icon_entry.bind("<FocusIn>", on_icon_focus_in)
-        icon_entry.bind("<FocusOut>", on_icon_focus_out)
+            模式窗口.bind("<Escape>", lambda e: 设定模式(None))
+            模式窗口.bind("<Return>", lambda e: 设定模式("quick"))
 
-        def 选择图标():
-            初始目录 = self.workspace_dir if os.path.isdir(self.workspace_dir) else os.path.expanduser("~")
-            当前图标 = icon_var.get().strip()
-            if 当前图标 and os.path.isfile(当前图标):
-                初始目录 = os.path.dirname(os.path.abspath(当前图标))
-            文件 = filedialog.askopenfilename(
-                title="选择 .ico 图标",
-                initialdir=初始目录,
-                filetypes=[("Windows 图标文件", "*.ico")],
-                parent=dlg,
+            self.root.update_idletasks()
+            模式窗口.update_idletasks()
+            宽 = max(560, 主框.winfo_reqwidth() + 24)
+            高 = max(220, 主框.winfo_reqheight() + 24)
+            x = self.root.winfo_rootx() + max(20, (self.root.winfo_width() - 宽) // 2)
+            y = self.root.winfo_rooty() + max(20, (self.root.winfo_height() - 高) // 2)
+            模式窗口.geometry(f"{宽}x{高}+{x}+{y}")
+            self.root.wait_window(模式窗口)
+            return 结果容器["值"]
+
+        导出模式 = 选择导出模式()
+        if 导出模式 is None:
+            return
+
+        打包配置 = None
+
+        if 导出模式 == "quick":
+            打包配置 = {
+                "软件名称": 默认软件名,
+                "输出路径": 默认输出路径,
+                "图标路径": 默认图标路径 or None,
+                "隐藏黑框": True,
+                "模式文本": "纯净窗口版（不显示黑框）",
+                "模式标题": "一键打包",
+            }
+        elif 导出模式 == "advanced":
+            高级窗口 = tk.Toplevel(self.root)
+            高级窗口.title("导出软件（高级设置）")
+            高级窗口.configure(bg=self.theme_toolbar_bg)
+            高级窗口.resizable(False, False)
+            高级窗口.transient(self.root)
+            高级窗口.grab_set()
+
+            名称变量 = tk.StringVar(value=默认软件名)
+            路径变量 = tk.StringVar(value=默认输出路径)
+            图标变量 = tk.StringVar(value=默认图标路径)
+            模式变量 = tk.StringVar(value="windowed")
+            结果容器 = {"值": None}
+
+            主框 = tk.Frame(高级窗口, bg=self.theme_toolbar_bg, padx=14, pady=12)
+            主框.pack(fill=tk.BOTH, expand=True)
+
+            标签样式 = {"bg": self.theme_toolbar_bg, "fg": self.theme_toolbar_fg, "font": self.font_ui}
+            输入样式 = {"font": self.font_ui, "bg": self.theme_bg, "fg": self.theme_fg, "insertbackground": self.theme_fg}
+
+            tk.Label(主框, text="软件名称：", **标签样式).grid(row=0, column=0, sticky="w", pady=(0, 6))
+            名称输入 = tk.Entry(主框, textvariable=名称变量, width=48, **输入样式)
+            名称输入.grid(row=0, column=1, columnspan=2, sticky="we", padx=(8, 0), pady=(0, 6))
+
+            tk.Label(主框, text="输出路径：", **标签样式).grid(row=1, column=0, sticky="w", pady=6)
+            路径输入 = tk.Entry(主框, textvariable=路径变量, width=48, **输入样式)
+            路径输入.grid(row=1, column=1, sticky="we", padx=(8, 8), pady=6)
+
+            tk.Label(主框, text="图标文件：", **标签样式).grid(row=2, column=0, sticky="w", pady=6)
+            图标输入 = tk.Entry(主框, textvariable=图标变量, width=48, **输入样式)
+            图标输入.grid(row=2, column=1, sticky="we", padx=(8, 8), pady=6)
+
+            tk.Label(主框, text="运行模式：", **标签样式).grid(row=3, column=0, sticky="nw", pady=(8, 2))
+            模式框 = tk.Frame(主框, bg=self.theme_toolbar_bg)
+            模式框.grid(row=3, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 2))
+
+            tk.Radiobutton(
+                模式框,
+                text="代码黑框版（调试）",
+                variable=模式变量,
+                value="console",
+                bg=self.theme_toolbar_bg,
+                fg=self.theme_toolbar_fg,
+                selectcolor=self.theme_panel_bg,
+                activebackground=self.theme_toolbar_bg,
+                activeforeground=self.theme_toolbar_fg,
+                font=self.font_ui,
+            ).pack(anchor="w")
+            tk.Radiobutton(
+                模式框,
+                text="纯净窗口版（发布）",
+                variable=模式变量,
+                value="windowed",
+                bg=self.theme_toolbar_bg,
+                fg=self.theme_toolbar_fg,
+                selectcolor=self.theme_panel_bg,
+                activebackground=self.theme_toolbar_bg,
+                activeforeground=self.theme_toolbar_fg,
+                font=self.font_ui,
+            ).pack(anchor="w")
+
+            提示文字 = tk.Label(
+                主框,
+                text="说明：可直接手动改路径；图标留空会使用默认 logo.ico（如存在）。",
+                bg=self.theme_toolbar_bg,
+                fg=self.theme_toolbar_muted,
+                font=self.font_ui,
+                anchor="w",
             )
-            if 文件:
-                icon_entry.config(foreground=self.theme_fg)
-                icon_var.set(文件)
+            提示文字.grid(row=4, column=0, columnspan=3, sticky="we", pady=(8, 10))
 
-        图标侧栏 = tk.Frame(form_frame, bg=self.theme_sidebar_bg)
-        图标侧栏.grid(row=2, column=2, padx=(10, 0), sticky="w")
-        tk.Button(
-            图标侧栏,
-            text="选择图标",
-            command=选择图标,
-            font=("Microsoft YaHei", 8),
-            bg=self.theme_toolbar_bg,
-            fg=self.theme_fg,
-            activebackground="#505050",
-            activeforeground="#FFFFFF",
-            relief="flat",
-            borderwidth=0,
-            cursor="hand2",
-            padx=10,
-            pady=2,
-        ).pack(anchor="w")
-        tk.Label(
-            图标侧栏,
-            text="留空=默认图标",
-            font=("Microsoft YaHei", 8),
-            bg=self.theme_sidebar_bg,
-            fg="#8FA5B5",
-        ).pack(anchor="w", pady=(4, 0))
+            按钮框 = tk.Frame(主框, bg=self.theme_toolbar_bg)
+            按钮框.grid(row=5, column=0, columnspan=3, sticky="e")
 
-        # 4. 运行模式 (黑框)
-        tk.Label(form_frame, text="运行模式：", font=self.font_ui, bg=self.theme_sidebar_bg, fg=self.theme_fg).grid(row=3, column=0, sticky="ne", pady=10)
-        mode_var = tk.IntVar(value=1) # 默认 1 (显示控制台)
-        mode_frame = tk.Frame(form_frame, bg=self.theme_sidebar_bg)
-        mode_frame.grid(row=3, column=1, columnspan=2, sticky="w", pady=10)
+            def 选择输出路径():
+                当前路径值 = 路径变量.get().strip()
+                初始目录 = self.workspace_dir
+                初始文件 = f"{清理软件名(名称变量.get())}.exe"
+                if 当前路径值:
+                    当前路径值 = os.path.abspath(os.path.expanduser(当前路径值))
+                    if os.path.isdir(os.path.dirname(当前路径值)):
+                        初始目录 = os.path.dirname(当前路径值)
+                    基础名 = os.path.basename(当前路径值)
+                    if 基础名:
+                        初始文件 = 基础名
+                选择结果 = filedialog.asksaveasfilename(
+                    title="选择导出 EXE 路径",
+                    parent=高级窗口,
+                    initialdir=初始目录,
+                    initialfile=初始文件,
+                    defaultextension=".exe",
+                    filetypes=[("Windows 可执行文件", "*.exe"), ("所有文件", "*.*")],
+                )
+                if 选择结果:
+                    路径变量.set(选择结果)
 
-        tk.Radiobutton(
-            mode_frame,
-            text="代码黑框版（推荐调试）",
-            variable=mode_var,
-            value=1,
-            font=self.font_ui,
-            bg=self.theme_sidebar_bg,
-            fg="#DCE7F3",
-            activebackground=self.theme_sidebar_bg,
-            activeforeground="#FFFFFF",
-            selectcolor=self.theme_bg,
-            anchor="w",
-            padx=2,
-        ).pack(anchor="w")
+            def 选择图标():
+                当前图标值 = 图标变量.get().strip()
+                初始目录 = self.workspace_dir
+                if 当前图标值 and os.path.isdir(os.path.dirname(os.path.abspath(os.path.expanduser(当前图标值)))):
+                    初始目录 = os.path.dirname(os.path.abspath(os.path.expanduser(当前图标值)))
+                选择结果 = filedialog.askopenfilename(
+                    title="选择图标文件（.ico）",
+                    parent=高级窗口,
+                    initialdir=初始目录,
+                    filetypes=[("图标文件", "*.ico"), ("所有文件", "*.*")],
+                )
+                if 选择结果:
+                    图标变量.set(选择结果)
 
-        tk.Radiobutton(
-            mode_frame,
-            text="纯净窗口版（发布给用户）",
-            variable=mode_var,
-            value=2,
-            font=self.font_ui,
-            bg=self.theme_sidebar_bg,
-            fg="#DCE7F3",
-            activebackground=self.theme_sidebar_bg,
-            activeforeground="#FFFFFF",
-            selectcolor=self.theme_bg,
-            anchor="w",
-            padx=2,
-        ).pack(anchor="w", pady=(6, 0))
+            def 取消高级():
+                高级窗口.destroy()
 
-        tk.Label(
-            mode_frame,
-            text="黑框版会显示日志窗口；纯净版不显示黑框。",
-            font=("Microsoft YaHei", 8),
-            bg=self.theme_sidebar_bg,
-            fg="#8FA5B5",
-            anchor="w",
-        ).pack(anchor="w", pady=(6, 0))
+            def 确认高级():
+                软件名 = 清理软件名(名称变量.get())
+                输出路径 = str(路径变量.get() or "").strip()
+                if not 输出路径:
+                    输出路径 = os.path.join(默认输出目录, f"{软件名}.exe")
+                else:
+                    try:
+                        当前绝对 = os.path.normcase(os.path.abspath(os.path.expanduser(输出路径)))
+                        默认绝对 = os.path.normcase(os.path.abspath(默认输出路径))
+                        if 当前绝对 == 默认绝对:
+                            输出路径 = os.path.join(默认输出目录, f"{软件名}.exe")
+                    except Exception:
+                        pass
+                输出路径 = os.path.abspath(os.path.expanduser(输出路径))
+                if not 输出路径.lower().endswith(".exe"):
+                    输出路径 += ".exe"
 
-        # 底部按钮
-        btn_frame = tk.Frame(dlg, bg=self.theme_sidebar_bg)
-        btn_frame.pack(fill=tk.X, pady=(10, 20), padx=30)
-        
-        def start_packing():
-            软件名称原始 = app_name_var.get().strip()
-            if not 软件名称原始:
-                messagebox.showerror("抱歉", "软件名称不能为空。", parent=dlg)
+                图标值 = str(图标变量.get() or "").strip()
+                图标值 = os.path.abspath(os.path.expanduser(图标值)) if 图标值 else None
+                if 图标值 and not os.path.isfile(图标值):
+                    messagebox.showwarning("图标无效", "图标文件不存在，请重新选择。", parent=高级窗口)
+                    return
+
+                隐藏黑框 = 模式变量.get() == "windowed"
+                模式文本 = "纯净窗口版（不显示黑框）" if 隐藏黑框 else "代码黑框版（带日志窗口）"
+                结果容器["值"] = {
+                    "软件名称": 软件名,
+                    "输出路径": 输出路径,
+                    "图标路径": 图标值,
+                    "隐藏黑框": 隐藏黑框,
+                    "模式文本": 模式文本,
+                    "模式标题": "高级导出",
+                }
+                高级窗口.destroy()
+
+            浏览输出按钮 = tk.Button(主框, text="浏览...", command=选择输出路径, font=self.font_ui, width=10)
+            浏览输出按钮.grid(row=1, column=2, sticky="e", pady=6)
+            浏览图标按钮 = tk.Button(主框, text="浏览...", command=选择图标, font=self.font_ui, width=10)
+            浏览图标按钮.grid(row=2, column=2, sticky="e", pady=6)
+
+            tk.Button(按钮框, text="取消", command=取消高级, font=self.font_ui, width=10).pack(side=tk.RIGHT, padx=(8, 0))
+            tk.Button(按钮框, text="开始打包", command=确认高级, font=self.font_ui, width=12, bg="#1E7BC8", fg="#FFFFFF").pack(side=tk.RIGHT)
+
+            主框.grid_columnconfigure(1, weight=1)
+            名称输入.focus_set()
+            高级窗口.bind("<Return>", lambda e: 确认高级())
+            高级窗口.bind("<Escape>", lambda e: 取消高级())
+
+            self.root.update_idletasks()
+            高级窗口.update_idletasks()
+            宽 = max(860, 主框.winfo_reqwidth() + 28)
+            高 = max(420, 主框.winfo_reqheight() + 28)
+            x = self.root.winfo_rootx() + max(20, (self.root.winfo_width() - 宽) // 2)
+            y = self.root.winfo_rooty() + max(20, (self.root.winfo_height() - 高) // 2)
+            高级窗口.geometry(f"{宽}x{高}+{x}+{y}")
+            self.root.wait_window(高级窗口)
+            打包配置 = 结果容器["值"]
+
+        if not 打包配置:
+            return
+
+        输出路径 = os.path.abspath(os.path.expanduser(打包配置["输出路径"]))
+        if os.path.exists(输出路径):
+            if not messagebox.askyesno("确认覆盖", f"目标文件已存在：\n{输出路径}\n\n是否覆盖？", parent=self.root):
                 return
-            软件名称 = 清理软件名(软件名称原始)
 
-            target_input = path_var.get().strip()
-            if not target_input:
-                messagebox.showerror("抱歉", "得给我一个保存地址呀！", parent=dlg)
-                return
-            保存目录 = 解析保存目录(target_input)
+        提示文本 = (
+            f"模式：{打包配置['模式标题']}\n"
+            + f"入口：{os.path.basename(源码入口) if 源码入口 else '当前编辑内容'}\n"
+            + f"软件名：{打包配置['软件名称']}\n"
+            + f"输出路径：{输出路径}\n"
+            + f"图标：{打包配置['图标路径'] if 打包配置['图标路径'] else '默认 logo.ico（如存在）'}\n"
+            + f"运行模式：{打包配置['模式文本']}\n\n"
+            + "确认开始打包吗？"
+        )
+        if not messagebox.askyesno("确认导出", 提示文本, parent=self.root):
+            return
+
+        self._clear_output_console(keep_intro=True)
+        self.print_output(
+            "=============================\n"
+            + f"开始打包 EXE（{打包配置['模式标题']}）\n"
+            + "============================="
+        )
+
+        import threading
+        import tempfile
+
+        def 打印进度(文字):
+            self.root.after(0, lambda: self.print_output(文字))
+
+        def 后台打包():
+            原始目录 = os.getcwd()
+            临时入口 = None
             try:
-                os.makedirs(保存目录, exist_ok=True)
-            except Exception as e:
-                messagebox.showerror("抱歉", f"保存目录不可用：{e}", parent=dlg)
-                return
-            target_path = os.path.join(保存目录, f"{软件名称}.exe")
-                
-            icon_path = icon_var.get().strip()
-            if icon_path == "(留空则使用默认易码图标)":
-                icon_path = None
-                
-            隐藏黑框 = (mode_var.get() == 2)
-            
-            dlg.destroy() # 关闭弹窗开始干活
-            
-            import threading
-            import tempfile
-            
-            self.print_output("=============================\n开始编译并打包 EXE。该过程需要调用底层工具链，可能持续几十秒到几分钟。\n=============================")
-            
-            def 打印进度(文字):
-                self.root.after(0, lambda: self.print_output(文字))
-
-            def 后台打包():
-                try:
+                if not 源码入口:
                     临时目录 = tempfile.gettempdir()
-                    临时ym = os.path.join(临时目录, "_易码源码编译缓冲.ym")
-                    with open(临时ym, 'w', encoding='utf-8') as f:
+                    临时入口 = os.path.join(临时目录, "_易码源码编译缓冲.ym")
+                    with open(临时入口, "w", encoding="utf-8") as f:
                         f.write(源码内容)
-                        
-                    源码目录 = None
-                    当前文件路径 = self.tabs_data[tab_id]["filepath"] if (tab_id and tab_id in self.tabs_data) else None
-                    if 当前文件路径 and os.path.isfile(当前文件路径):
-                        源码目录 = os.path.dirname(os.path.abspath(当前文件路径))
-                    elif self.workspace_dir and os.path.isdir(self.workspace_dir):
-                        源码目录 = self.workspace_dir
+                    打包入口 = 临时入口
+                else:
+                    打包入口 = 源码入口
 
-                    from 易码打包工具 import 编译并打包
-                    最终编译出来的路径 = 编译并打包(
-                        临时ym,
-                        图标路径=icon_path,
-                        隐藏黑框=隐藏黑框,
-                        进度打字机=打印进度,
-                        软件名称=软件名称,
-                        源码目录=源码目录,
-                    )
-                    
-                    工具输出路径 = os.path.abspath(最终编译出来的路径)
-                    最终保存路径 = os.path.abspath(target_path)
-                    same_path = os.path.normcase(os.path.normpath(工具输出路径)) == os.path.normcase(os.path.normpath(最终保存路径))
+                os.chdir(self.workspace_dir)
+                from 易码打包工具 import 编译并打包
 
-                    if not same_path:
-                        os.makedirs(os.path.dirname(最终保存路径), exist_ok=True)
-                        if os.path.exists(最终保存路径):
-                            os.remove(最终保存路径)
-                        # 保留易码_成品软件中的原始产物，同时复制到用户指定位置
-                        shutil.copy2(工具输出路径, 最终保存路径)
+                最终路径 = 编译并打包(
+                    打包入口,
+                    图标路径=打包配置["图标路径"],
+                    隐藏黑框=打包配置["隐藏黑框"],
+                    进度打印=打印进度,
+                    软件名称=打包配置["软件名称"],
+                    源码目录=self.workspace_dir,
+                )
+                最终绝对路径 = os.path.abspath(最终路径)
+                目标绝对路径 = os.path.abspath(输出路径)
 
-                    self.root.after(0, lambda src=工具输出路径, dst=最终保存路径: self.print_output(
-                        f"📦 工具输出：{src}\n📍 最终保存：{dst}"
-                    ))
-                    self.root.after(0, lambda dst=最终保存路径: messagebox.showinfo("打包完成", f"可执行文件已生成：\n{dst}"))
-                except Exception as e:
-                    self.root.after(0, lambda msg=str(e): messagebox.showerror("打包失败了", msg))
-                    
-            t = threading.Thread(target=后台打包)
-            t.daemon = True
-            t.start()
+                if os.path.normcase(最终绝对路径) != os.path.normcase(目标绝对路径):
+                    os.makedirs(os.path.dirname(目标绝对路径), exist_ok=True)
+                    if os.path.exists(目标绝对路径):
+                        os.remove(目标绝对路径)
+                    shutil.move(最终绝对路径, 目标绝对路径)
+                    最终绝对路径 = 目标绝对路径
 
-        tk.Button(
-            btn_frame,
-            text="取消",
-            font=("Microsoft YaHei", 9),
-            command=dlg.destroy,
-            bg=self.theme_toolbar_bg,
-            fg=self.theme_fg,
-            activebackground="#505050",
-            activeforeground="#FFFFFF",
-            relief="flat",
-            borderwidth=0,
-            cursor="hand2",
-            padx=14,
-            pady=5,
-        ).pack(side=tk.RIGHT, padx=(10, 0))
-        tk.Button(btn_frame, text="🚀 立即打包", font=("Microsoft YaHei", 10, "bold"), bg="#0E639C", fg="white", activebackground="#1177BB", activeforeground="white", relief="flat", borderwidth=0, cursor="hand2", padx=15, pady=5, command=start_packing).pack(side=tk.RIGHT)
+                self.root.after(0, lambda p=最终绝对路径: self.print_output(f"打包成功：{p}"))
+                self.root.after(0, lambda p=最终绝对路径: messagebox.showinfo("打包完成", f"可执行文件已生成：\n{p}"))
+            except Exception as e:
+                self.root.after(0, lambda msg=str(e): messagebox.showerror("打包失败", msg))
+            finally:
+                try:
+                    os.chdir(原始目录)
+                except Exception:
+                    pass
+                if 临时入口 and os.path.isfile(临时入口):
+                    try:
+                        os.remove(临时入口)
+                    except Exception:
+                        pass
 
+        t = threading.Thread(target=后台打包, daemon=True)
+        t.start()
 if __name__ == "__main__":
     # 必须在初始化 Tk 之前宣告 DPI 感知，否则即使点数(pt)字体缩放了，Tkinter本身也会按照低分屏映射引发排版错乱
     try:
@@ -4587,6 +5142,13 @@ if __name__ == "__main__":
     y = h/2 - size[1]/2
     root.geometry("%dx%d+%d+%d" % (size[0], size[1], x, y))
     
-    root.mainloop()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        # 允许在终端用 Ctrl+C 结束，不打印 traceback。
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 

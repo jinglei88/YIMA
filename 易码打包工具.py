@@ -53,18 +53,17 @@ def 清理软件名(名称, 默认值="易码生成软件"):
 def _提取引入模块名(源码文本):
     """
     从易码源码中提取模块引用：
-      - 引入 "模块名" ...
-      - 用 "模块名" 中的 ...
+      - 引入 "模块名" 叫做 别名
     """
     结果 = []
-    引入模式 = re.compile(r'^\s*(引入|用)\s*["“]([^"”]+)["”]')
+    引入模式 = re.compile(r'^\s*引入\s*["“]([^"”]+)["”]\s*叫做\s*[A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*')
     for 原始行 in str(源码文本 or "").splitlines():
         去注释 = 原始行.split("#", 1)[0].strip()
         if not 去注释:
             continue
         匹配 = 引入模式.match(去注释)
         if 匹配:
-            模块名 = 匹配.group(2).strip()
+            模块名 = 匹配.group(1).strip()
             if 模块名:
                 结果.append(模块名)
     return 结果
@@ -343,7 +342,7 @@ if __name__ == '__main__':
     for 资源源路径, 资源目标目录 in 打包清单["datas"]:
         额外数据参数.extend(["--add-data", f"{资源源路径}{分隔符}{资源目标目录}"])
 
-    # 扫描 .ym 源码里的 引入/用，自动补充 Python hidden-import，减少“写了代码但打包后缺依赖”
+    # 扫描 .ym 源码里的统一引入语句，自动补充 Python hidden-import，减少“写了代码但打包后缺依赖”
     分析样本 = [绝对源码路径] + [p for p in 项目源码文件 if os.path.abspath(p) != 绝对源码路径]
     自动隐藏导入 = {"turtle", "tkinter", "tkinter.messagebox"}
     自动隐藏导入.update(_分析隐式Python依赖(分析样本, 源码所在目录))

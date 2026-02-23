@@ -131,14 +131,14 @@ def semantic_check() -> None:
             '引入 "_scope_mod" 叫做 库\n'
             "库.增加一次()\n"
             "库.增加一次()\n"
-            '用 "_scope_mod" 中的 当前计数\n'
+            '引入 "_scope_mod" 叫做 当前计数\n'
             "显示 当前计数()\n",
             encoding="utf-8",
         )
 
         out = run_cmd([PY, "易码.py", str(main)])
-        assert_contains(out, "2", "模块函数作用域与精确引入")
-    print("[OK] 模块函数作用域与精确引入通过")
+        assert_contains(out, "2", "模块函数作用域与统一引入")
+    print("[OK] 模块函数作用域与统一引入通过")
 
     out = run_cmd(
         [

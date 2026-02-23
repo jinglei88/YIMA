@@ -3,8 +3,9 @@
 
 默认执行：
 1. scripts/run_regression.py
-2. M16 自动回归
-3. 打包冒烟（含打包清单机制）
+2. scripts/run_docs_regression.py
+3. M16 自动回归
+4. 打包冒烟（含打包清单机制）
 """
 
 from __future__ import annotations
@@ -72,6 +73,11 @@ def assert_contains(text: str, needle: str, label: str) -> None:
 def regression_base() -> None:
     run_cmd([PY, "scripts/run_regression.py"])
     print("[OK] 基础回归通过")
+
+
+def regression_docs() -> None:
+    run_cmd([PY, "scripts/run_docs_regression.py"])
+    print("[OK] 文档一致性回归通过")
 
 
 def regression_m16() -> None:
@@ -144,6 +150,7 @@ def main() -> int:
 
     print("=== 易码发布回归开始 ===")
     regression_base()
+    regression_docs()
     regression_m16()
     if args.skip_pack:
         print("[SKIP] 已跳过打包冒烟")

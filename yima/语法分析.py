@@ -92,7 +92,12 @@ class 语法分析器:
         elif 当前.类型 == Token类型.关键字_引入:
             return self._解析引入语句()
         elif 当前.类型 == Token类型.关键字_用:
-            return self._解析用语句()
+            raise 语法报错(
+                "【用 ... 中的 ...】写法已停用。请改为【引入 \"模块\" 叫做 名称】。",
+                当前.行号,
+                当前.列号,
+                "示例：把 `用 \"math\" 中的 pi` 改为 `引入 \"math\" 叫做 pi`。",
+            )
         elif 当前.类型 == Token类型.关键字_如果:
             return self._解析如果语句()
         elif 当前.类型 == Token类型.关键字_尝试:
@@ -154,27 +159,30 @@ class 语法分析器:
         引入Token = self._吃掉(Token类型.关键字_引入)
         模块Token = self._吃掉(Token类型.文本, "【引入】后应使用引号包裹模块名，例如：引入 \"math\"")
         模块名 = 模块Token.值
-        别名 = None
-        if self._当前Token().类型 == Token类型.关键字_叫做:
-            self._前进()
-            别名Token = self._吃掉(Token类型.标识符, "【叫做】后应提供模块别名。")
-            别名 = 别名Token.值
+        if self._当前Token().类型 != Token类型.关键字_叫做:
+            raise 语法报错(
+                "引入语句必须使用统一写法：`引入 \"模块\" 叫做 别名`。",
+                self._当前Token().行号,
+                self._当前Token().列号,
+                "例如：引入 \"系统工具\" 叫做 系统",
+            )
+        self._前进()
+        别名Token = self._吃掉(Token类型.标识符, "【叫做】后应提供模块别名。")
+        别名 = 别名Token.值
             
         if self._当前Token().类型 == Token类型.换行:
             self._前进()
         return 引入语句节点(模块名, 别名, 引入Token.行号)
 
     def _解析用语句(self):
+        # 保留方法只用于向旧调用点给出统一迁移提示。
         用Token = self._吃掉(Token类型.关键字_用)
-        模块Token = self._吃掉(Token类型.文本, "【用】后应使用引号包裹模块名，例如：用 \"数学库.ym\" 中的 算平方")
-        模块名 = 模块Token.值
-        self._吃掉(Token类型.关键字_中的, "请使用【中的】指定要引入的名称。")
-        功能Token = self._吃掉(Token类型.标识符, "【中的】后应为要引入的名称。")
-        功能名 = 功能Token.值
-        
-        if self._当前Token().类型 == Token类型.换行:
-            self._前进()
-        return 精确引入语句节点(模块名, 功能名, 用Token.行号)
+        raise 语法报错(
+            "【用 ... 中的 ...】写法已停用。请改为【引入 \"模块\" 叫做 名称】。",
+            用Token.行号,
+            用Token.列号,
+            "示例：引入 \"math\" 叫做 pi",
+        )
 
     def _解析返回语句(self):
         返回Token = self._吃掉(Token类型.关键字_返回)
@@ -202,16 +210,12 @@ class 语法分析器:
                     self._前进()
             self._吃掉(Token类型.右括号)
         elif self._当前Token().类型 == Token类型.关键字_需要:
-            self._前进()
-            while self._当前Token().类型 not in (Token类型.换行, Token类型.文件结束):
-                词 = self._当前Token()
-                if 词.类型 == Token类型.标识符:
-                    参数列表.append(词.值)
-                    self._前进()
-                if self._当前Token().类型 == Token类型.逗号:
-                    self._前进()
-                else:
-                    break
+            raise 语法报错(
+                "图纸参数写法已统一为括号形式，不再支持【需要】。",
+                self._当前Token().行号,
+                self._当前Token().列号,
+                "示例：定义图纸 玩家(名字, 血量)",
+            )
                     
         代码块 = self._解析代码块()
         return 图纸定义节点(图纸名, 参数列表, 代码块, 自我Token.行号)
@@ -255,16 +259,12 @@ class 语法分析器:
                 else: break
             self._吃掉(Token类型.右括号, "参数列表缺少右括号。")
         elif 当前.类型 == Token类型.关键字_需要:
-            self._前进()
-            while self._当前Token().类型 not in (Token类型.换行, Token类型.文件结束):
-                词 = self._当前Token()
-                if 词.类型 == Token类型.标识符:
-                    参数列表.append(词.值)
-                    self._前进()
-                if self._当前Token().类型 == Token类型.逗号:
-                    self._前进()
-                else:
-                    break
+            raise 语法报错(
+                "功能参数写法已统一为括号形式，不再支持【需要】。",
+                当前.行号,
+                当前.列号,
+                "示例：功能 求和(a, b)",
+            )
                     
         代码块 = self._解析代码块()
         return 定义函数节点(函数名, 参数列表, 代码块, 函数名Token.行号)
@@ -312,16 +312,19 @@ class 语法分析器:
         if 如果出错Token.类型 == Token类型.关键字_如果出错:
             self._前进() # 越过 如果出错
             
-            # 可选写法：叫做 变量名，或直接写变量名
+            # 统一写法：如果需要错误变量，必须写 叫做 变量名
             如果叫做Token = self._当前Token()
             if 如果叫做Token.类型 == Token类型.关键字_叫做:
                 self._前进()
                 名字Token = self._吃掉(Token类型.标识符, "【如果出错 叫做】后应填写错误变量名。")
                 错误名 = 名字Token.值
             elif 如果叫做Token.类型 == Token类型.标识符:
-                # 允许直接写 如果出错 变量名（不需要叫做）
-                错误名 = 如果叫做Token.值
-                self._前进()
+                raise 语法报错(
+                    "错误捕获变量必须写成【如果出错 叫做 变量名】。",
+                    如果叫做Token.行号,
+                    如果叫做Token.列号,
+                    "示例：如果出错 叫做 错误",
+                )
                 
             出错代码块 = self._解析代码块()
             

@@ -35,7 +35,7 @@
 显示 "sqrt(16) ="
 显示 数学库.sqrt(16)
 
-用 "math" 中的 pi
+引入 "math" 叫做 pi
 显示 "pi ="
 显示 pi
 
