@@ -23,6 +23,7 @@ import json
 import inspect
 import importlib
 import importlib.util
+import time
 
 # 将当前目录添加到系统路径，确保能找到 yima 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -52,12 +53,22 @@ class 易码IDE:
         self._semantic_module_cache = {}
         self._py_module_member_cache = {}
         self._py_module_member_detail_cache = {}
+        self._py_module_member_signature_cache = {}
+        self._runtime_builtin_signature_cache = {}
+        self._runtime_builtin_signature_loaded = False
         self.find_dialog = None
         self.find_var = tk.StringVar(value="")
         self.replace_var = tk.StringVar(value="")
         self._autocomplete_items = []
+        self._autocomplete_row_ids = []
         self._autocomplete_replace_start = None
         self._autocomplete_replace_end = None
+        self._autocomplete_popup_line = None
+        self._autocomplete_mouse_down = False
+        self._last_edit_tab_id = None
+        self._last_edit_index = None
+        self._last_edit_word = ""
+        self._last_edit_ts = 0.0
         self._load_project_state()
         self._pair_map = {
             "(": ")",
@@ -167,6 +178,28 @@ class 易码IDE:
         style.configure("Horizontal.TScrollbar", background="#3A4555", troughcolor=self.theme_panel_inner_bg, bordercolor=self.theme_panel_inner_bg, arrowcolor="#B6C5D8", relief="flat", borderwidth=0)
         style.map("Vertical.TScrollbar", background=[("active", "#4C5D73")])
         style.map("Horizontal.TScrollbar", background=[("active", "#4C5D73")])
+        style.configure(
+            "YimaAutocomplete.Treeview",
+            font=self.font_code,
+            rowheight=int(max(22, 24 * self.dpi_scale)),
+            background=self.theme_sidebar_bg,
+            foreground=self.theme_fg,
+            fieldbackground=self.theme_sidebar_bg,
+            borderwidth=0,
+        )
+        style.map(
+            "YimaAutocomplete.Treeview",
+            background=[("selected", "#143A59")],
+            foreground=[("selected", "#FFFFFF")],
+        )
+        style.configure(
+            "YimaAutocomplete.Treeview.Heading",
+            font=("Microsoft YaHei", 9, "bold"),
+            background="#1B2A40",
+            foreground="#C7D7EB",
+            borderwidth=0,
+            relief="flat",
+        )
         
         # 定制 Notebook 标签页无缝沉浸式外观
         style.configure("TNotebook", background=self.theme_bg, borderwidth=0, padding=0)
@@ -189,8 +222,12 @@ class 易码IDE:
             "所有键", "所有值", "存在",
             "截取", "查找", "替换", "分割", "去空格", "包含",
             "读文件", "写文件", "追加文件",
-            "文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录", "拼路径", "绝对路径", "当前目录",
-            "解析JSON", "生成JSON", "读JSON", "写JSON",
+            "文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录",
+            "复制文件", "移动文件", "重命名", "遍历文件",
+            "复制目录", "压缩目录", "解压缩", "哈希文本", "哈希文件", "下载文件",
+            "匹配文件", "文件信息", "目录大小", "格式时间", "解析时间", "写日志", "读日志", "睡眠",
+            "拼路径", "绝对路径", "当前目录", "读环境变量", "写环境变量", "执行命令",
+            "解析JSON", "生成JSON", "读JSON", "写JSON", "读CSV", "写CSV", "读INI", "写INI",
             "发起请求", "发GET", "发POST", "读响应JSON", "发GET_JSON", "发POST_JSON",
             "打开数据库", "执行SQL", "查询SQL", "开始事务", "提交事务", "回滚事务", "关闭数据库",
             "排序", "倒序", "去重", "合并", "最大值", "最小值",
@@ -207,8 +244,14 @@ class 易码IDE:
     def _builtin_module_exports(self):
         return {
             "文件管理": ["读文件", "写文件", "追加文件"],
-            "系统工具": ["文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录", "拼路径", "绝对路径", "当前目录"],
-            "数据工具": ["解析JSON", "生成JSON", "读JSON", "写JSON"],
+            "系统工具": [
+                "文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录",
+                "复制文件", "移动文件", "重命名", "遍历文件",
+                "复制目录", "压缩目录", "解压缩", "哈希文本", "哈希文件", "下载文件",
+                "匹配文件", "文件信息", "目录大小", "格式时间", "解析时间", "写日志", "读日志", "睡眠",
+                "拼路径", "绝对路径", "当前目录", "读环境变量", "写环境变量", "执行命令",
+            ],
+            "数据工具": ["解析JSON", "生成JSON", "读JSON", "写JSON", "读CSV", "写CSV", "读INI", "写INI"],
             "网络请求": ["发起请求", "发GET", "发POST", "读响应JSON", "发GET_JSON", "发POST_JSON"],
             "本地数据库": ["打开数据库", "执行SQL", "查询SQL", "关闭数据库", "开始事务", "提交事务", "回滚事务"],
             "图形界面": [
@@ -754,21 +797,67 @@ class 易码IDE:
         self.tree_menu.add_separator()
         self.tree_menu.add_command(label="🗑️ 删除", command=self.delete_item_in_tree)
         
-        # 智能弹出提示框 (IntelliSense Listbox)
-        self.autocomplete_listbox = tk.Listbox(
-            self.root, font=self.font_code, bg=self.theme_sidebar_bg, fg=self.theme_fg, 
-            selectbackground="#062F4A", selectforeground="#FFFFFF", 
-            borderwidth=1, relief="solid", highlightthickness=0, height=8,
-            activestyle="none", takefocus=0, exportselection=False
+        # 智能弹出提示框（双列：类型 + 候选）
+        self.autocomplete_popup = tk.Frame(
+            self.root,
+            bg=self.theme_toolbar_border,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#102033",
+            highlightcolor="#1E3B5B",
         )
-        self.autocomplete_listbox.place_forget()
-        self.autocomplete_listbox.bind("<Up>", self._handle_autocomplete_nav)
-        self.autocomplete_listbox.bind("<Down>", self._handle_autocomplete_nav)
-        self.autocomplete_listbox.bind("<Return>", self._accept_autocomplete)
-        self.autocomplete_listbox.bind("<KP_Enter>", self._accept_autocomplete)
-        self.autocomplete_listbox.bind("<Escape>", lambda e: (self._hide_autocomplete(), "break")[1])
-        self.autocomplete_listbox.bind("<ButtonRelease-1>", self._accept_autocomplete)
-        self.autocomplete_listbox.bind("<Double-Button-1>", self._accept_autocomplete)
+        self.autocomplete_tree = ttk.Treeview(
+            self.autocomplete_popup,
+            columns=("kind", "item"),
+            show="headings",
+            selectmode="browse",
+            style="YimaAutocomplete.Treeview",
+        )
+        self.autocomplete_tree.heading("kind", text="类型")
+        self.autocomplete_tree.heading("item", text="候选")
+        self.autocomplete_tree.column("kind", anchor="w", width=120, minwidth=90, stretch=False)
+        self.autocomplete_tree.column("item", anchor="w", width=280, minwidth=180, stretch=True)
+        self.autocomplete_vsb = ttk.Scrollbar(self.autocomplete_popup, orient="vertical", command=self.autocomplete_tree.yview)
+        self.autocomplete_hsb = ttk.Scrollbar(self.autocomplete_popup, orient="horizontal", command=self.autocomplete_tree.xview)
+        self.autocomplete_tree.configure(yscrollcommand=self.autocomplete_vsb.set, xscrollcommand=self.autocomplete_hsb.set)
+        self.autocomplete_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.autocomplete_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.autocomplete_hsb.pack(side=tk.BOTTOM, fill=tk.X)
+        self.autocomplete_popup.place_forget()
+
+        self.autocomplete_tree.bind("<ButtonPress-1>", self._on_autocomplete_mouse_press)
+        self.autocomplete_tree.bind("<Up>", self._handle_autocomplete_nav)
+        self.autocomplete_tree.bind("<Down>", self._handle_autocomplete_nav)
+        self.autocomplete_tree.bind("<Prior>", self._handle_autocomplete_nav)
+        self.autocomplete_tree.bind("<Next>", self._handle_autocomplete_nav)
+        self.autocomplete_tree.bind("<Return>", self._accept_autocomplete)
+        self.autocomplete_tree.bind("<KP_Enter>", self._accept_autocomplete)
+        self.autocomplete_tree.bind("<Escape>", lambda e: (self._hide_autocomplete(), "break")[1])
+        self.autocomplete_tree.bind("<ButtonRelease-1>", self._accept_autocomplete)
+        self.autocomplete_tree.bind("<Double-Button-1>", self._accept_autocomplete)
+
+        # 参数提示（Call Tip）
+        self.calltip_popup = tk.Frame(
+            self.root,
+            bg="#0F1B2B",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#2B4664",
+            highlightcolor="#2B4664",
+        )
+        self.calltip_label = tk.Label(
+            self.calltip_popup,
+            text="",
+            font=self.font_code,
+            bg="#0F1B2B",
+            fg="#DCEBFF",
+            anchor="w",
+            justify="left",
+            padx=8,
+            pady=4,
+        )
+        self.calltip_label.pack(fill=tk.BOTH, expand=True)
+        self.calltip_popup.place_forget()
         
         # 初始化界面后：优先恢复上次项目；恢复失败则创建默认代码页
         if not self._try_restore_last_project():
@@ -818,6 +907,7 @@ class 易码IDE:
         if not target_editor:
             return
             
+        target_editor.bind("<KeyRelease>", self._remember_edit_cursor, add="+")
         target_editor.bind("<KeyRelease>", self._schedule_highlight)
         target_editor.bind("<KeyRelease>", self._update_line_numbers, add="+")
         target_editor.bind("<KeyRelease>", self._highlight_current_line, add="+")
@@ -826,6 +916,9 @@ class 易码IDE:
         target_editor.bind("<KeyRelease>", self._update_cursor_status, add="+")
         target_editor.bind("<ButtonRelease>", self._highlight_current_line, add="+")
         target_editor.bind("<ButtonRelease>", self._update_cursor_status, add="+")
+        target_editor.bind("<ButtonRelease>", self._schedule_calltip_update, add="+")
+        target_editor.bind("<ButtonRelease>", self._remember_edit_cursor, add="+")
+        target_editor.bind("<ButtonRelease-1>", self._sync_insert_after_click, add="+")
         target_editor.bind("<MouseWheel>", self._update_line_numbers, add="+")
         target_editor.bind("<Configure>", self._update_line_numbers, add="+")
         target_editor.bind("<FocusIn>", self._update_cursor_status, add="+")
@@ -836,6 +929,7 @@ class 易码IDE:
         
         # 智能回车换行与自动缩进
         target_editor.bind("<Return>", self._handle_return)
+        target_editor.bind("<KP_Enter>", self._handle_return)
         
         # Tab 键代码片段补全 / 多行缩进 / 占位符跳转
         target_editor.bind("<Tab>", self._handle_tab)
@@ -854,6 +948,8 @@ class 易码IDE:
         target_editor.bind("<Button-1>", self._handle_editor_left_click)
         target_editor.bind("<Up>", self._handle_autocomplete_nav)
         target_editor.bind("<Down>", self._handle_autocomplete_nav)
+        target_editor.bind("<Prior>", self._handle_autocomplete_nav)
+        target_editor.bind("<Next>", self._handle_autocomplete_nav)
         target_editor.bind("<Escape>", lambda e: self._hide_autocomplete())
         target_editor.bind("<Control-space>", self._trigger_autocomplete)
     # ==========================
@@ -1247,6 +1343,84 @@ class 易码IDE:
                     return os.path.abspath(候选)
         return None
 
+    def _语义正则兜底导出(self, 代码):
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        导出符号 = set()
+        导出类型 = {}
+        导出签名 = {}
+        类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0}
+
+        def 记导出(名称, 类型, 签名=""):
+            名称文本 = str(名称 or "").strip()
+            if not 名称文本:
+                return
+            导出符号.add(名称文本)
+            旧类型 = 导出类型.get(名称文本, "member")
+            if 类型优先级.get(类型, 0) >= 类型优先级.get(旧类型, 0):
+                导出类型[名称文本] = 类型
+            签名文本 = str(签名 or "").strip()
+            if 签名文本 and not 导出签名.get(名称文本):
+                导出签名[名称文本] = 签名文本
+
+        代码文本 = str(代码 or "")
+        功能行模式 = re.compile(rf'^\s*功能\s+({标识符模式})(.*)$')
+        图纸行模式 = re.compile(rf'^\s*定义图纸\s+({标识符模式})(.*)$')
+        变量行模式 = re.compile(rf'^\s*({标识符模式})\s*=')
+        引入行模式 = re.compile(
+            rf'^\s*引入\s*["“](.+?)["”]\s*(?:叫做\s*({标识符模式}))?\s*$'
+        )
+
+        for 行文本 in 代码文本.splitlines():
+            去空 = 行文本.strip()
+            if not 去空 or 去空.startswith("#"):
+                continue
+
+            功能匹配 = 功能行模式.match(行文本)
+            if 功能匹配:
+                名称 = 功能匹配.group(1)
+                尾部 = str(功能匹配.group(2) or "").strip()
+                参数列表 = []
+                if 尾部.startswith("(") and ")" in 尾部:
+                    参数串 = 尾部[1:尾部.find(")")]
+                    参数列表 = [p.strip() for p in str(参数串).split(",") if p.strip()]
+                else:
+                    需要匹配 = re.search(rf'\b需要\b\s*(.*)$', 尾部)
+                    if 需要匹配:
+                        参数串 = str(需要匹配.group(1) or "").strip()
+                        参数列表 = [p.strip() for p in re.split(r'[,\s]+', 参数串) if p.strip()]
+                记导出(名称, "function", self._格式化参数签名(参数列表))
+                continue
+
+            图纸匹配 = 图纸行模式.match(行文本)
+            if 图纸匹配:
+                名称 = 图纸匹配.group(1)
+                尾部 = str(图纸匹配.group(2) or "").strip()
+                参数列表 = []
+                if 尾部.startswith("(") and ")" in 尾部:
+                    参数串 = 尾部[1:尾部.find(")")]
+                    参数列表 = [p.strip() for p in str(参数串).split(",") if p.strip()]
+                else:
+                    需要匹配 = re.search(rf'\b需要\b\s*(.*)$', 尾部)
+                    if 需要匹配:
+                        参数串 = str(需要匹配.group(1) or "").strip()
+                        参数列表 = [p.strip() for p in re.split(r'[,\s]+', 参数串) if p.strip()]
+                记导出(名称, "blueprint", self._格式化参数签名(参数列表))
+                continue
+
+            变量匹配 = 变量行模式.match(行文本)
+            if 变量匹配:
+                记导出(变量匹配.group(1), "variable")
+                continue
+
+            引入匹配 = 引入行模式.match(行文本)
+            if 引入匹配:
+                模块名 = str(引入匹配.group(1) or "").strip()
+                别名 = str(引入匹配.group(2) or "").strip()
+                名称 = 别名 if 别名 else self._默认模块别名(模块名)
+                记导出(名称, "alias")
+
+        return 导出符号, 导出类型, 导出签名
+
     def _语义读取模块导出(self, 模块路径):
         绝对路径 = os.path.abspath(str(模块路径))
         try:
@@ -1258,31 +1432,46 @@ class 易码IDE:
         if 缓存项 and 缓存项.get("mtime") == 修改时间:
             return set(缓存项.get("symbols", set())), 缓存项.get("error")
 
+        代码 = ""
         try:
             with open(绝对路径, "r", encoding="utf-8") as f:
                 代码 = f.read()
             语法树 = 语法分析器(词法分析器(代码).分析()).解析()
         except Exception as e:
             错误文本 = f"模块解析失败：{e}"
+            兜底符号, 兜底类型, 兜底签名 = self._语义正则兜底导出(代码)
+            if 兜底符号:
+                self._semantic_module_cache[绝对路径] = {
+                    "mtime": 修改时间,
+                    "symbols": set(兜底符号),
+                    "symbol_kinds": dict(兜底类型),
+                    "symbol_signatures": dict(兜底签名),
+                    "error": 错误文本,
+                }
+                return set(兜底符号), None
             self._semantic_module_cache[绝对路径] = {
                 "mtime": 修改时间,
                 "symbols": set(),
                 "symbol_kinds": {},
+                "symbol_signatures": {},
                 "error": 错误文本,
             }
             return None, 错误文本
 
         导出符号 = set()
         导出类型 = {}
+        导出签名 = {}
         类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0}
 
-        def 记导出(名称, 类型):
+        def 记导出(名称, 类型, 签名=""):
             if not 名称:
                 return
             导出符号.add(名称)
             旧类型 = 导出类型.get(名称, "member")
             if 类型优先级.get(类型, 0) >= 类型优先级.get(旧类型, 0):
                 导出类型[名称] = 类型
+            if 签名 and (not 导出签名.get(名称)):
+                导出签名[名称] = 签名
 
         for 语句 in getattr(语法树, "语句列表", []) or []:
             类型名 = type(语句).__name__
@@ -1291,10 +1480,12 @@ class 易码IDE:
                 记导出(名称, "variable")
             elif 类型名 == "定义函数节点":
                 名称 = getattr(语句, "函数名", "")
-                记导出(名称, "function")
+                参数列表 = list(getattr(语句, "参数列表", []) or [])
+                记导出(名称, "function", self._格式化参数签名(参数列表))
             elif 类型名 == "图纸定义节点":
                 名称 = getattr(语句, "图纸名", "")
-                记导出(名称, "blueprint")
+                参数列表 = list(getattr(语句, "参数列表", []) or [])
+                记导出(名称, "blueprint", self._格式化参数签名(参数列表))
             elif 类型名 == "引入语句节点":
                 名称 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
                 记导出(名称, "alias")
@@ -1303,6 +1494,7 @@ class 易码IDE:
             "mtime": 修改时间,
             "symbols": set(导出符号),
             "symbol_kinds": dict(导出类型),
+            "symbol_signatures": dict(导出签名),
             "error": None,
         }
         return 导出符号, None
@@ -1317,6 +1509,15 @@ class 易码IDE:
         if not 类型表 and 符号:
             类型表 = {名称: "member" for 名称 in 符号}
         return 类型表, None
+
+    def _语义读取模块导出签名(self, 模块路径):
+        绝对路径 = os.path.abspath(str(模块路径))
+        _, 错误 = self._语义读取模块导出(绝对路径)
+        if 错误:
+            return {}, 错误
+        缓存项 = self._semantic_module_cache.get(绝对路径) or {}
+        签名表 = dict(缓存项.get("symbol_signatures", {}))
+        return 签名表, None
 
     def _语义分析(self, 语法树, tab_id=None):
         警告列表 = []
@@ -1724,86 +1925,339 @@ class 易码IDE:
             self._refresh_issue_list()
 
     def _handle_return(self, event=None):
-        if self.autocomplete_listbox.winfo_ismapped():
+        if self._autocomplete_is_visible():
             self._accept_autocomplete()
             return "break"
         return self._auto_indent(event)
 
-    def _handle_tab(self, event=None):
-        if self.autocomplete_listbox.winfo_ismapped():
-            self._accept_autocomplete()
-            return "break"
-        editor = self._get_current_editor()
-        if not editor: return "break"
-        
-        # 1. 如果是多行选区：对每行做缩进
-        try:
-            sel_start = editor.index(tk.SEL_FIRST)
-            sel_end = editor.index(tk.SEL_LAST)
-            start_line = int(sel_start.split('.')[0])
-            end_line = int(sel_end.split('.')[0])
-            # 如果选择恰好到下一行开头，避免多缩进一行
-            if sel_end.split('.')[1] == '0' and start_line != end_line:
-                end_line -= 1
-            for i in range(start_line, end_line + 1):
-                editor.insert(f"{i}.0", "    ")
-            return "break"
-        except tk.TclError:
-            pass
-        
-        # 2. 取当前行文本和光标前词，判断是否触发 Snippet
+    def _tab_current_word(self, editor):
         insert_idx = editor.index("insert")
         line_start = editor.index("insert linestart")
         line_text_before = editor.get(line_start, insert_idx)
-        current_word_match = re.search(r'[\u4e00-\u9fa5a-zA-Z0-9_]+$', line_text_before)
-        current_word = current_word_match.group(0) if current_word_match else ""
-        
-        # 搜索下一个占位符 ‹...› 的位置 (只在当前行)
-        start_idx = editor.search('\u2039', line_start, f"{line_start} lineend")
-        
-        # 3. 优先级：若光标后没有占位符，并且当前词是 snippet 触发词，则展开 snippet
-        if current_word and current_word in self.snippets:
-            # 判断光标后是否还有占位符
-            after_cursor = editor.search('\u2039', insert_idx, f"{line_start} lineend")
-            if not after_cursor:
-                # 删除触发词
-                word_start_idx = f"insert - {len(current_word)}c"
-                editor.delete(word_start_idx, insert_idx)
-                # 插入 snippet 文本
-                snippet_text = self.snippets[current_word]
-                editor.insert(word_start_idx, snippet_text)
-                # 定位第一个占位符并选中
-                start_idx = editor.search('\u2039', word_start_idx, f"{word_start_idx} lineend")
-                if start_idx:
-                    end_line = editor.get(start_idx, f"{start_idx} lineend")
-                    match_content = re.search(r"\u2039.+?\u203a", end_line)
-                    if match_content:
-                        end_idx = f"{start_idx} + {len(match_content.group(0))}c"
-                        editor.tag_remove("sel", "1.0", "end")
-                        editor.tag_add("sel", start_idx, end_idx)
-                        editor.mark_set("insert", start_idx)  # 将光标移过来
-                        editor.see("insert")
-                
-                self.highlight()
-                return "break" # 阻止默认的 Tab 键行为
-                
-        # 4. 如果没有触发 Snippet，但下文有一个占位符，直接跃迁过去 (多占位符支持)
-        if start_idx:
-            match_content = editor.get(start_idx, f"{start_idx} lineend")
-            match_str = re.search(r"\u2039.+?\u203a", match_content)
-            if match_str:
-                end_idx = f"{start_idx} + {len(match_str.group(0))}c"
-                editor.tag_remove("sel", "1.0", "end")
-                editor.tag_add("sel", start_idx, end_idx)
-                editor.mark_set("insert", start_idx)
-                editor.see("insert")
-                return "break"
-                
-        # 如果什么都不是，当做正常的单个或选区文本替换/缩进处理
+        match = re.search(r'[\u4e00-\u9fa5a-zA-Z0-9_]+$', line_text_before)
+        return insert_idx, line_start, (match.group(0) if match else "")
+
+    def _tab_find_nearby_standalone_snippet_line(self, editor, center_line):
+        """在光标附近寻找“只输入了模板关键词”的独立行，避免 Tab 误在旧行展开。"""
         try:
-            editor.delete(tk.SEL_FIRST, tk.SEL_LAST)
-        except tk.TclError: pass
+            total_lines = int(editor.index("end-1c").split(".")[0])
+            center = int(center_line)
+        except Exception:
+            return None
+
+        low = max(1, center - 4)
+        high = min(total_lines, center + 8)
+        candidates = []
+        for line_no in range(low, high + 1):
+            try:
+                line_text = editor.get(f"{line_no}.0", f"{line_no}.end")
+            except tk.TclError:
+                continue
+            stripped = line_text.strip()
+            if not stripped:
+                continue
+            # 只匹配“整行就是关键词”的情况，避免误把已展开的模板行再次识别。
+            if stripped in self.snippets and "‹" not in stripped and "›" not in stripped:
+                candidates.append(line_no)
+
+        if not candidates:
+            return None
+        # 同距离时优先选择更靠下的一行（更接近“刚输入”的场景）。
+        return sorted(candidates, key=lambda ln: (abs(ln - center), -ln))[0]
+
+    def _tab_selection_info(self, editor, insert_idx=None):
+        try:
+            sel_start = editor.index(tk.SEL_FIRST)
+            sel_end = editor.index(tk.SEL_LAST)
+            sel_text = editor.get(sel_start, sel_end)
+        except tk.TclError:
+            return {
+                "start": None,
+                "end": None,
+                "text": "",
+                "contains_cursor": False,
+            }
+        if insert_idx is None:
+            contains_cursor = True
+        else:
+            try:
+                contains_cursor = (
+                    editor.compare(sel_start, "<=", insert_idx)
+                    and editor.compare(insert_idx, "<", sel_end)
+                )
+            except tk.TclError:
+                contains_cursor = False
+        return {
+            "start": sel_start,
+            "end": sel_end,
+            "text": sel_text,
+            "contains_cursor": contains_cursor,
+        }
+
+    def _remember_edit_cursor(self, event=None):
+        editor = None
+        if event is not None and hasattr(event, "widget"):
+            candidate = getattr(event, "widget", None)
+            if isinstance(candidate, tk.Text) and self._get_tab_id_by_editor(candidate):
+                editor = candidate
+        if editor is None:
+            editor = self._get_current_editor()
+        if not editor:
+            return
+
+        tab_id = self._get_tab_id_by_editor(editor)
+        if not tab_id:
+            return
+        try:
+            idx, _, word = self._tab_current_word(editor)
+        except Exception:
+            return
+        self._last_edit_tab_id = tab_id
+        self._last_edit_index = idx
+        self._last_edit_word = str(word or "")
+        self._last_edit_ts = time.monotonic()
+
+    def _tab_placeholder_range_on_line(self, editor, index_value):
+        try:
+            index_text = editor.index(index_value)
+            line_text, col_text = index_text.split(".")
+            line_no = int(line_text)
+            col_no = int(col_text)
+        except Exception:
+            return (None, None)
+        try:
+            line_code = editor.get(f"{line_no}.0", f"{line_no}.end")
+        except tk.TclError:
+            return (None, None)
+            
+        # 寻找包含光标位置的最内层 ‹ 和 ›
+        left = line_code.rfind("‹", 0, max(0, col_no) + 1)
+        if left != -1:
+            # 找到左括号后，向右寻找右括号，起点是左括号位置，而非光标位置
+            right = line_code.find("›", left)
+            if right != -1:
+                # 只要光标在这个括号范围内（或者刚超出一点点，代表可能刚刚在括号内打完字）
+                if left <= col_no <= right + 1:
+                    return (f"{line_no}.{left}", f"{line_no}.{right + 1}")
         
+        # 容错：如果光标刚好跑到了右括号外面一个字符（如：删除了再输入导致偏移）
+        left = line_code.rfind("‹", 0, max(0, col_no))
+        if left != -1:
+            right = line_code.find("›", left)
+            if right != -1:
+                if left <= col_no <= right + 2:
+                    return (f"{line_no}.{left}", f"{line_no}.{right + 1}")
+                    
+        return (None, None)
+
+    def _tab_jump_to_next_placeholder(self, editor, from_index):
+        try:
+            search_index = editor.index(from_index or "insert")
+        except tk.TclError:
+            search_index = editor.index("insert")
+        while True:
+            start_idx = editor.search('\u2039', search_index, "end")
+            if not start_idx:
+                return False
+            line_end = editor.index(f"{start_idx} lineend")
+            line_rest = editor.get(start_idx, line_end)
+            match = re.match(r"\u2039.+?\u203a", line_rest)
+            if not match:
+                search_index = editor.index(f"{start_idx}+1c")
+                continue
+            end_idx = f"{start_idx} + {len(match.group(0))}c"
+            editor.tag_remove("sel", "1.0", "end")
+            editor.tag_add("sel", start_idx, end_idx)
+            editor.mark_set("insert", start_idx)
+            editor.see("insert")
+            return True
+
+    def _expand_snippet_at_cursor(self, editor, snippet_word, typed_word=''):
+        snippet_name = str(snippet_word or '').strip()
+        snippet_text = self.snippets.get(snippet_name)
+        if not snippet_text:
+            return False
+
+        # 简单逻辑：找到光标前的关键词，删掉它，在原位插入代码模板
+        insert_idx = editor.index('insert')
+        line_start = editor.index('insert linestart')
+        line_before = editor.get(line_start, insert_idx)
+        remove_word = str(typed_word or snippet_name).strip()
+
+        # 计算要删除的起点（光标前面的关键词）
+        if remove_word and line_before.endswith(remove_word):
+            del_start = f'insert - {len(remove_word)}c'
+        else:
+            del_start = 'insert'
+
+        # 删除关键词，插入代码模板
+        # 必须先把 del_start 转成绝对位置！否则 delete 后 insert 标记移动，
+        # 再次计算 "insert - Nc" 会跳到错误的行
+        del_start = editor.index(del_start)
+
+        # 智能缩进：根据插入位置的缩进级别，调整模板的每一行
+        base_col = int(del_start.split('.')[1])
+        base_indent = " " * base_col
+        if base_col > 0:
+            lines = snippet_text.split('\n')
+            # 第一行不加缩进（因为它替换了关键词的位置），后续行加基础缩进
+            snippet_text = lines[0] + ''.join('\n' + base_indent + line for line in lines[1:])
+
+        editor.delete(del_start, 'insert')
+        editor.insert(del_start, snippet_text)
+
+        # 光标跳到框架下方新行，方便用户继续写 否则如果 / 不然 等
+        try:
+            # 计算插入起始行的缩进（与框架头对齐）
+            start_line = int(del_start.split('.')[0])
+            start_col = int(del_start.split('.')[1])
+            缩进文本 = " " * start_col
+            # 找到插入的最后一行
+            行数 = snippet_text.count('\n')
+            末行 = start_line + 行数
+            editor.mark_set('insert', f'{末行}.end')
+            editor.insert('insert', '\n' + 缩进文本)
+            editor.tag_remove('sel', '1.0', 'end')
+        except Exception:
+            try:
+                editor.mark_set('insert', f'{del_start} + {len(snippet_text)}c')
+                editor.tag_remove('sel', '1.0', 'end')
+            except tk.TclError:
+                pass
+        self.highlight()
+        return True
+
+
+    def _handle_tab(self, event=None):
+        editor = None
+        if event is not None and hasattr(event, "widget"):
+            candidate = getattr(event, "widget", None)
+            if isinstance(candidate, tk.Text) and self._get_tab_id_by_editor(candidate):
+                editor = candidate
+        if editor is None:
+            editor = self._get_current_editor()
+        if not editor: return "break"
+        try:
+            editor.focus_set()
+        except tk.TclError:
+            pass
+
+        强制展开词 = ""
+        光标前词 = ""
+        insert_idx, _, 光标前词 = self._tab_current_word(editor)
+        try:
+            当前行号 = int(insert_idx.split(".")[0])
+        except Exception:
+            当前行号 = 1
+
+        # 当前光标前已形成模板词时，直接在当前行展开，忽略旧弹窗状态
+        if 光标前词 and 光标前词 in self.snippets:
+            self._hide_autocomplete()
+            self._expand_snippet_at_cursor(editor, 光标前词, typed_word=光标前词)
+            return "break"
+
+        if self._autocomplete_is_visible():
+            是模板候选 = False
+            同行弹窗 = False
+            try:
+                当前行 = editor.index("insert").split(".")[0]
+                同行弹窗 = bool(self._autocomplete_popup_line and str(self._autocomplete_popup_line) == str(当前行))
+                idx = self._autocomplete_current_index()
+                if 0 <= idx < len(self._autocomplete_items):
+                    当前候选 = self._autocomplete_items[idx] or {}
+                    是模板候选 = str(当前候选.get("source", "")).strip() == "snippet"
+                    if 是模板候选:
+                        强制展开词 = str(当前候选.get("insert", "")).strip()
+            except Exception:
+                是模板候选 = False
+                同行弹窗 = False
+                强制展开词 = ""
+
+            if 是模板候选:
+                # 模板展开只走“当前光标前词”路径；弹窗模板在 Tab 时不直接展开。
+                # 这样可避免中文输入法未提交/旧弹窗状态导致跨行插入。
+                self._hide_autocomplete()
+                if 同行弹窗 and 光标前词 and (光标前词 in self.snippets):
+                    self._expand_snippet_at_cursor(editor, 光标前词, typed_word=光标前词)
+                return "break"
+            else:
+                self._accept_autocomplete()
+                return "break"
+
+        选区 = self._tab_selection_info(editor, insert_idx)
+        sel_start = 选区["start"]
+        sel_end = 选区["end"]
+        sel_text = 选区["text"]
+        sel_contains_cursor = bool(选区["contains_cursor"])
+        if sel_start and sel_end and (not sel_contains_cursor):
+            sel_start = None
+            sel_end = None
+            sel_text = ""
+            try:
+                editor.tag_remove("sel", "1.0", "end")
+            except tk.TclError:
+                pass
+
+        当前选中占位符 = bool(
+            sel_start and sel_end and sel_contains_cursor
+            and sel_text.startswith("‹") and sel_text.endswith("›")
+        )
+        if 当前选中占位符:
+            if self._tab_jump_to_next_placeholder(editor, sel_end):
+                return "break"
+        elif self._tab_jump_to_next_placeholder(editor, insert_idx):
+            return "break"
+
+        # 没有更多占位符了：如果光标在缩进块内，跳出到块下方新行
+        try:
+            当前行文本 = editor.get("insert linestart", "insert lineend")
+            当前缩进 = len(当前行文本) - len(当前行文本.lstrip())
+            if 当前缩进 > 0 or (当前选中占位符 and sel_text):
+                # 找到当前块的结束位置：向下扫描直到缩进变小或文件结束
+                当前行号 = int(editor.index("insert").split(".")[0])
+                总行数 = int(editor.index("end-1c").split(".")[0])
+                目标行 = 当前行号
+                for i in range(当前行号, 总行数 + 1):
+                    行 = editor.get(f"{i}.0", f"{i}.end")
+                    if 行.strip():
+                        行缩进 = len(行) - len(行.lstrip())
+                        if 行缩进 >= 当前缩进 or i == 当前行号:
+                            目标行 = i
+                        else:
+                            break
+                    else:
+                        目标行 = i
+                        break
+
+                # 计算父级缩进（比当前缩进少一级）
+                父级缩进 = max(0, 当前缩进 - 4)
+                缩进文本 = " " * 父级缩进
+
+                # 在块下方插入新行
+                editor.mark_set("insert", f"{目标行}.end")
+                editor.insert("insert", "\n" + 缩进文本)
+                self.highlight()
+                return "break"
+        except Exception:
+            pass
+
+        if sel_start and sel_end and sel_contains_cursor and not 当前选中占位符:
+            try:
+                start_line = int(sel_start.split('.')[0])
+                end_line = int(sel_end.split('.')[0])
+                if sel_end.split('.')[1] == '0' and start_line != end_line:
+                    end_line -= 1
+                for i in range(start_line, end_line + 1):
+                    editor.insert(f"{i}.0", "    ")
+                return "break"
+            except Exception:
+                pass
+
+        if sel_start and sel_end and sel_contains_cursor and not 当前选中占位符:
+            try:
+                editor.delete(sel_start, sel_end)
+            except tk.TclError:
+                pass
         editor.insert("insert", "    ")
         return "break"
 
@@ -1817,6 +2271,14 @@ class 易码IDE:
             return
 
         ch = event.char
+        
+        # 输入普通字符时，如果存在选区，不仅要替换文本，在中文输入法下也更符合直觉
+        if ch and ord(ch) >= 32 and event.keysym not in ("Return", "Tab", "Escape"):
+            try:
+                if editor.index(tk.SEL_FIRST) != editor.index(tk.SEL_LAST):
+                    editor.delete(tk.SEL_FIRST, tk.SEL_LAST)
+            except tk.TclError:
+                pass
 
         # 中文输入法下的句号自动转英文点：系统。 -> 系统.
         # 仅在代码区生效；字符串/注释中保留原样，避免影响中文文本输入。
@@ -1922,7 +2384,6 @@ class 易码IDE:
         return state["points"]
 
     def _handle_editor_left_click(self, event):
-        self._hide_autocomplete()
         editor = self._get_current_editor()
         tab_id, state = self._get_multi_state()
         if not editor or event.widget is not editor or state is None:
@@ -1932,9 +2393,32 @@ class 易码IDE:
         if event.state & 0x0008:
             return
 
+        self._hide_autocomplete()
+        self._hide_calltip()
+        try:
+            click_idx = editor.index(f"@{event.x},{event.y}")
+            editor.mark_set("insert", click_idx)
+            editor.tag_remove("sel", "1.0", "end")
+            editor.focus_set()
+        except tk.TclError:
+            pass
+
         if state.get("ranges") or state.get("points"):
             self._clear_multi_cursor_mode(tab_id)
             self.status_main_var.set("多光标模式已退出")
+
+    def _sync_insert_after_click(self, event=None):
+        editor = self._get_current_editor()
+        if not editor:
+            return
+        if event is not None and event.widget is not editor:
+            return
+        try:
+            if event is not None:
+                idx = editor.index(f"@{event.x},{event.y}")
+                editor.mark_set("insert", idx)
+        except tk.TclError:
+            pass
 
     def multi_cursor_alt_click(self, event=None):
         editor = self._get_current_editor()
@@ -1944,7 +2428,7 @@ class 易码IDE:
         if event is None or event.widget is not editor:
             return "break"
 
-        self.autocomplete_listbox.place_forget()
+        self._hide_autocomplete()
 
         try:
             click_idx = editor.index(f"@{event.x},{event.y}")
@@ -2688,34 +3172,523 @@ class 易码IDE:
         self._check_autocomplete(event=None)
         return "break"
 
+    def _schedule_calltip_update(self, event=None):
+        try:
+            self.root.after_idle(self._update_calltip)
+        except Exception:
+            pass
+
+    def _autocomplete_is_visible(self):
+        try:
+            return bool(self.autocomplete_popup.winfo_ismapped())
+        except Exception:
+            return False
+
+    def _is_autocomplete_widget(self, 控件):
+        当前 = 控件
+        for _ in range(8):
+            if 当前 is None:
+                return False
+            if 当前 is self.autocomplete_popup or 当前 is self.autocomplete_tree:
+                return True
+            当前 = getattr(当前, "master", None)
+        return False
+
+    def _autocomplete_select_index(self, 索引):
+        总数 = len(self._autocomplete_row_ids)
+        if 总数 <= 0:
+            return
+        idx = max(0, min(总数 - 1, int(索引)))
+        行id = self._autocomplete_row_ids[idx]
+        try:
+            self.autocomplete_tree.selection_set(行id)
+            self.autocomplete_tree.focus(行id)
+            self.autocomplete_tree.see(行id)
+        except tk.TclError:
+            pass
+
+    def _autocomplete_current_index(self):
+        if not self._autocomplete_row_ids:
+            return 0
+        try:
+            选择项 = self.autocomplete_tree.selection()
+            if 选择项:
+                return max(0, self._autocomplete_row_ids.index(选择项[0]))
+            焦点项 = self.autocomplete_tree.focus()
+            if 焦点项:
+                return max(0, self._autocomplete_row_ids.index(焦点项))
+        except Exception:
+            pass
+        return 0
+
+    def _autocomplete_index_from_event(self, event=None):
+        if event is None or not hasattr(event, "y"):
+            return None
+        try:
+            行id = self.autocomplete_tree.identify_row(event.y)
+            if not 行id:
+                return None
+            return self._autocomplete_row_ids.index(行id)
+        except Exception:
+            return None
+
+    def _on_autocomplete_mouse_press(self, event=None):
+        self._autocomplete_mouse_down = True
+        try:
+            self.autocomplete_tree.focus_set()
+        except tk.TclError:
+            pass
+        return None
+
     def _on_editor_focus_out(self, event=None):
         # 点击补全列表时，编辑器会先失焦；延后判断可避免误隐藏
-        self.root.after(10, self._hide_autocomplete_if_focus_lost)
+        self.root.after(20, self._hide_autocomplete_if_focus_lost)
 
     def _hide_autocomplete_if_focus_lost(self):
-        if not self.autocomplete_listbox.winfo_ismapped():
+        if not self._autocomplete_is_visible():
             return
+        if self._autocomplete_mouse_down:
+            try:
+                鼠标控件 = self.root.winfo_containing(self.root.winfo_pointerx(), self.root.winfo_pointery())
+            except tk.TclError:
+                鼠标控件 = None
+            if self._is_autocomplete_widget(鼠标控件):
+                return
+            self._autocomplete_mouse_down = False
         焦点控件 = self.root.focus_get()
-        if 焦点控件 is self.autocomplete_listbox:
+        if self._is_autocomplete_widget(焦点控件):
             return
+        try:
+            鼠标控件 = self.root.winfo_containing(self.root.winfo_pointerx(), self.root.winfo_pointery())
+            if self._is_autocomplete_widget(鼠标控件):
+                return
+        except tk.TclError:
+            pass
         self._hide_autocomplete()
+        self._hide_calltip()
 
     def _hide_autocomplete(self):
-        self.autocomplete_listbox.place_forget()
+        try:
+            self.autocomplete_popup.place_forget()
+        except tk.TclError:
+            pass
+        try:
+            for 行id in self.autocomplete_tree.get_children():
+                self.autocomplete_tree.delete(行id)
+        except tk.TclError:
+            pass
         self._autocomplete_items = []
+        self._autocomplete_row_ids = []
         self._autocomplete_replace_start = None
         self._autocomplete_replace_end = None
+        self._autocomplete_popup_line = None
+        self._autocomplete_mouse_down = False
+
+    def _hide_calltip(self):
+        try:
+            self.calltip_popup.place_forget()
+        except tk.TclError:
+            pass
+
+    def _show_calltip(self, editor, 文本):
+        if not editor:
+            self._hide_calltip()
+            return
+        内容文本 = str(文本 or "").strip()
+        if not 内容文本:
+            self._hide_calltip()
+            return
+
+        bbox = editor.bbox("insert")
+        if not bbox:
+            self._hide_calltip()
+            return
+
+        try:
+            self.calltip_label.configure(text=内容文本)
+            self.root.update_idletasks()
+            字体对象 = tkfont.Font(font=self.calltip_label.cget("font"))
+            文字宽度 = max(220, 字体对象.measure(内容文本) + 18)
+            根宽度 = max(420, int(self.root.winfo_width()))
+            最大宽度 = max(260, 根宽度 - 16)
+            提示宽度 = min(文字宽度, 最大宽度)
+            提示高度 = max(30, 字体对象.metrics("linespace") + 14)
+
+            x, y, _, 行高 = bbox
+            root_x = editor.winfo_rootx() - self.root.winfo_rootx() + x + 4
+            root_y = editor.winfo_rooty() - self.root.winfo_rooty() + y - 提示高度 - 6
+            if root_y < 8:
+                root_y = editor.winfo_rooty() - self.root.winfo_rooty() + y + 行高 + 4
+            if root_x + 提示宽度 > 根宽度 - 8:
+                root_x = max(8, 根宽度 - 提示宽度 - 8)
+
+            self.calltip_popup.place(x=root_x, y=root_y, width=提示宽度, height=提示高度)
+            self.calltip_popup.lift()
+        except Exception:
+            self._hide_calltip()
+
+    def _ensure_runtime_builtin_signatures(self):
+        if self._runtime_builtin_signature_loaded:
+            return
+        self._runtime_builtin_signature_loaded = True
+        try:
+            临时解释器 = 解释器()
+            记录本 = dict(getattr(临时解释器.全局环境, "记录本", {}) or {})
+            for 名称, 对象 in 记录本.items():
+                if not callable(对象):
+                    continue
+                self._runtime_builtin_signature_cache[str(名称)] = self._安全签名文本(对象)
+        except Exception:
+            self._runtime_builtin_signature_cache = {}
+
+    def _builtin_signature_of(self, 名称):
+        self._ensure_runtime_builtin_signatures()
+        return str(self._runtime_builtin_signature_cache.get(str(名称), "()") or "()")
+
+    def _拆分签名参数(self, 签名):
+        签名文本 = str(签名 or "").strip()
+        if not 签名文本.startswith("(") or not 签名文本.endswith(")"):
+            return []
+        内文 = 签名文本[1:-1]
+        if not 内文.strip():
+            return []
+        结果 = []
+        当前 = []
+        括号层 = 0
+        方括号层 = 0
+        花括号层 = 0
+        字符串引号 = ""
+        转义 = False
+        for ch in 内文:
+            if 字符串引号:
+                当前.append(ch)
+                if 转义:
+                    转义 = False
+                elif ch == "\\":
+                    转义 = True
+                elif ch == 字符串引号:
+                    字符串引号 = ""
+                continue
+            if ch in ("'", '"'):
+                字符串引号 = ch
+                当前.append(ch)
+                continue
+            if ch == "(":
+                括号层 += 1
+            elif ch == ")" and 括号层 > 0:
+                括号层 -= 1
+            elif ch == "[":
+                方括号层 += 1
+            elif ch == "]" and 方括号层 > 0:
+                方括号层 -= 1
+            elif ch == "{":
+                花括号层 += 1
+            elif ch == "}" and 花括号层 > 0:
+                花括号层 -= 1
+            if ch == "," and 括号层 == 0 and 方括号层 == 0 and 花括号层 == 0:
+                结果.append("".join(当前).strip())
+                当前 = []
+                continue
+            当前.append(ch)
+        if 当前:
+            结果.append("".join(当前).strip())
+        return [p for p in 结果 if p != ""]
+
+    def _高亮当前参数签名(self, 签名, 参数序号):
+        签名文本 = str(签名 or "").strip()
+        if not 签名文本:
+            return "()"
+        参数列表 = self._拆分签名参数(签名文本)
+        if not 参数列表:
+            return 签名文本
+        try:
+            idx = max(0, int(参数序号) - 1)
+        except Exception:
+            idx = 0
+        if idx < len(参数列表):
+            参数列表[idx] = f"【{参数列表[idx]}】"
+        return "(" + ", ".join(参数列表) + ")"
+
+    def _解析当前调用上下文(self, 行前文本):
+        文本 = str(行前文本 or "")
+        if not 文本:
+            return None
+
+        括号层 = 0
+        方括号层 = 0
+        花括号层 = 0
+        开括号位置 = -1
+        for i in range(len(文本) - 1, -1, -1):
+            ch = 文本[i]
+            if ch == ")":
+                括号层 += 1
+                continue
+            if ch == "]":
+                方括号层 += 1
+                continue
+            if ch == "}":
+                花括号层 += 1
+                continue
+            if ch == "(":
+                if 括号层 == 0 and 方括号层 == 0 and 花括号层 == 0:
+                    开括号位置 = i
+                    break
+                if 括号层 > 0:
+                    括号层 -= 1
+                continue
+            if ch == "[" and 方括号层 > 0:
+                方括号层 -= 1
+                continue
+            if ch == "{" and 花括号层 > 0:
+                花括号层 -= 1
+                continue
+        if 开括号位置 < 0:
+            return None
+
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        左侧文本 = 文本[:开括号位置]
+        名称匹配 = re.search(rf'({标识符模式}(?:\.{标识符模式})*)\s*$', 左侧文本)
+        if not 名称匹配:
+            return None
+        调用名 = 名称匹配.group(1)
+
+        参数区域 = 文本[开括号位置 + 1:]
+        逗号数 = 0
+        括号层 = 0
+        方括号层 = 0
+        花括号层 = 0
+        字符串引号 = ""
+        转义 = False
+        for ch in 参数区域:
+            if 字符串引号:
+                if 转义:
+                    转义 = False
+                elif ch == "\\":
+                    转义 = True
+                elif ch == 字符串引号:
+                    字符串引号 = ""
+                continue
+            if ch in ("'", '"'):
+                字符串引号 = ch
+                continue
+            if ch == "(":
+                括号层 += 1
+                continue
+            if ch == ")" and 括号层 > 0:
+                括号层 -= 1
+                continue
+            if ch == "[":
+                方括号层 += 1
+                continue
+            if ch == "]" and 方括号层 > 0:
+                方括号层 -= 1
+                continue
+            if ch == "{":
+                花括号层 += 1
+                continue
+            if ch == "}" and 花括号层 > 0:
+                花括号层 -= 1
+                continue
+            if ch == "," and 括号层 == 0 and 方括号层 == 0 and 花括号层 == 0:
+                逗号数 += 1
+
+        参数序号 = 1 if not 参数区域.strip() else (逗号数 + 1)
+        return {"调用名": 调用名, "参数序号": 参数序号}
+
+    def _解析调用表达式签名(self, 调用表达式, 上下文, tab_id=None):
+        名称 = str(调用表达式 or "").strip()
+        if not 名称:
+            return ""
+
+        功能签名 = dict((上下文 or {}).get("功能签名", {}) or {})
+        图纸签名 = dict((上下文 or {}).get("图纸签名", {}) or {})
+        导入签名 = dict((上下文 or {}).get("导入导出签名", {}) or {})
+        别名签名映射 = dict((上下文 or {}).get("别名成员签名映射", {}) or {})
+        引入别名 = dict((上下文 or {}).get("引入别名", {}) or {})
+
+        if 名称 in 功能签名:
+            return 功能签名[名称]
+        if 名称 in 图纸签名:
+            return 图纸签名[名称]
+        if 名称 in 导入签名:
+            return 导入签名[名称]
+        if 名称 in self.builtin_words:
+            return self._builtin_signature_of(名称)
+
+        if "." in 名称:
+            片段 = 名称.split(".")
+            对象名 = 片段[0].strip()
+            成员名 = 片段[-1].strip()
+            模块成员签名 = dict(别名签名映射.get(对象名, {}) or {})
+            if 成员名 in 模块成员签名:
+                return str(模块成员签名.get(成员名) or "()")
+            模块名 = 引入别名.get(对象名) or self._跨标签查别名模块(对象名, 当前tab_id=tab_id)
+            if 模块名:
+                签名表 = self._获取模块补全成员签名(模块名, tab_id=tab_id)
+                if 成员名 in 签名表:
+                    return str(签名表.get(成员名) or "()")
+            if 成员名 in self.builtin_words:
+                return self._builtin_signature_of(成员名)
+
+        return ""
+
+    def _update_calltip(self, editor=None, tab_id=None, 全文=None, 行前文本=None, 上下文=None):
+        编辑器 = editor if editor else self._get_current_editor()
+        if not 编辑器:
+            self._hide_calltip()
+            return
+        当前tab = tab_id if tab_id else self._get_current_tab_id()
+        try:
+            if 全文 is None:
+                全文 = 编辑器.get("1.0", "end-1c")
+            if 行前文本 is None:
+                行前文本 = 编辑器.get("insert linestart", "insert")
+        except tk.TclError:
+            self._hide_calltip()
+            return
+
+        调用上下文 = self._解析当前调用上下文(行前文本)
+        if not 调用上下文:
+            self._hide_calltip()
+            return
+
+        try:
+            光标行 = int(编辑器.index("insert").split(".")[0])
+        except Exception:
+            光标行 = 1
+        调用上下文数据 = 上下文 if 上下文 is not None else self._收集补全上下文(全文 or "", tab_id=当前tab, 光标行=光标行)
+        签名 = self._解析调用表达式签名(调用上下文["调用名"], 调用上下文数据, tab_id=当前tab)
+        if not 签名:
+            self._hide_calltip()
+            return
+
+        高亮签名 = self._高亮当前参数签名(签名, 调用上下文["参数序号"])
+        提示文本 = f"{调用上下文['调用名']}{高亮签名}    参数 {调用上下文['参数序号']}"
+        self._show_calltip(编辑器, 提示文本)
 
     def _autocomplete_match(self, 候选词, 前缀):
         if not 候选词:
             return False
-        if 候选词 == 前缀:
-            return False
         if not 前缀:
+            return True
+        if 候选词 == 前缀:
             return True
         if 候选词.startswith(前缀):
             return True
         return len(前缀) >= 2 and (前缀 in 候选词)
+
+    def _格式化参数签名(self, 参数列表):
+        参数 = [str(p).strip() for p in (参数列表 or []) if str(p).strip()]
+        return f"({', '.join(参数)})" if 参数 else "()"
+
+    def _安全签名文本(self, 可调用对象):
+        try:
+            签名 = str(inspect.signature(可调用对象))
+        except Exception:
+            return "()"
+        if not 签名:
+            return "()"
+        if len(签名) > 44:
+            return f"{签名[:41]}...)"
+        return 签名
+
+    def _提取定义签名(self, 全文):
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        内容 = 全文 or ""
+        功能签名 = {}
+        图纸签名 = {}
+        功能模式 = re.compile(
+            rf'^\s*功能\s+({标识符模式})\s*(?:\((.*?)\))?',
+            re.MULTILINE,
+        )
+        图纸模式 = re.compile(
+            rf'^\s*定义图纸\s+({标识符模式})\s*(?:\((.*?)\))?',
+            re.MULTILINE,
+        )
+
+        for 名称, 参数串 in 功能模式.findall(内容):
+            参数列表 = [p.strip() for p in str(参数串 or "").split(",") if p.strip()]
+            功能签名[名称] = self._格式化参数签名(参数列表)
+        for 名称, 参数串 in 图纸模式.findall(内容):
+            参数列表 = [p.strip() for p in str(参数串 or "").split(",") if p.strip()]
+            图纸签名[名称] = self._格式化参数签名(参数列表)
+        return 功能签名, 图纸签名
+
+    def _行首缩进宽度(self, 行文本):
+        行 = str(行文本 or "").replace("\t", "    ")
+        return len(行) - len(行.lstrip(" "))
+
+    def _提取当前作用域局部变量(self, 全文, 光标行):
+        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
+        内容 = 全文 or ""
+        行列表 = 内容.splitlines()
+        if not 行列表:
+            return set()
+
+        try:
+            目标行 = int(光标行 or 1)
+        except (TypeError, ValueError):
+            目标行 = 1
+        目标行 = max(1, min(目标行, len(行列表)))
+
+        作用域栈 = []
+        功能头模式 = re.compile(rf'^\s*功能\s+({标识符模式})\s*(?:\((.*?)\))?')
+        图纸头模式 = re.compile(rf'^\s*定义图纸\s+({标识符模式})\s*(?:\((.*?)\))?')
+
+        for 行号 in range(1, 目标行 + 1):
+            行文本 = 行列表[行号 - 1]
+            去空 = 行文本.strip()
+            if not 去空 or 去空.startswith("#"):
+                continue
+
+            缩进 = self._行首缩进宽度(行文本)
+            while 作用域栈 and 行号 > 作用域栈[-1]["line"] and 缩进 <= 作用域栈[-1]["indent"]:
+                作用域栈.pop()
+
+            匹配 = 功能头模式.match(行文本) or 图纸头模式.match(行文本)
+            if 匹配:
+                参数串 = str(匹配.group(2) or "")
+                参数列表 = [p.strip() for p in 参数串.split(",") if p.strip()]
+                作用域栈.append({
+                    "line": 行号,
+                    "indent": 缩进,
+                    "params": 参数列表,
+                })
+
+        if not 作用域栈:
+            return set()
+
+        当前作用域 = 作用域栈[-1]
+        局部变量 = set(当前作用域.get("params", []))
+        赋值模式 = re.compile(rf'^\s*({标识符模式})\s*=')
+        遍历模式 = re.compile(rf'^\s*遍历\b.*?\b叫做\s+({标识符模式})\b')
+        重复模式 = re.compile(rf'^\s*重复\b.*?\b次\s+叫做\s+({标识符模式})\b')
+        捕获模式 = re.compile(rf'^\s*如果出错\s+叫做\s+({标识符模式})\b')
+
+        for 行号 in range(当前作用域["line"] + 1, 目标行 + 1):
+            行文本 = 行列表[行号 - 1]
+            去空 = 行文本.strip()
+            if not 去空 or 去空.startswith("#"):
+                continue
+
+            缩进 = self._行首缩进宽度(行文本)
+            if 缩进 <= 当前作用域["indent"]:
+                break
+
+            赋值 = 赋值模式.match(行文本)
+            if 赋值:
+                局部变量.add(赋值.group(1))
+            遍历 = 遍历模式.match(行文本)
+            if 遍历:
+                局部变量.add(遍历.group(1))
+            重复 = 重复模式.match(行文本)
+            if 重复:
+                局部变量.add(重复.group(1))
+            捕获 = 捕获模式.match(行文本)
+            if 捕获:
+                局部变量.add(捕获.group(1))
+
+        return 局部变量
 
     def _提取引入别名映射(self, 全文):
         映射 = {}
@@ -2798,6 +3771,7 @@ class 易码IDE:
             return dict(self._py_module_member_detail_cache.get(名称, {}))
 
         详情 = {}
+        签名详情 = {}
         try:
             模块对象 = importlib.import_module(名称)
             for 成员名 in dir(模块对象):
@@ -2809,24 +3783,69 @@ class 易码IDE:
                     值 = getattr(模块对象, 成员名)
                     if inspect.isclass(值):
                         类型 = "class"
+                        签名详情[成员名] = self._安全签名文本(值)
                     elif callable(值):
                         类型 = "function"
+                        签名详情[成员名] = self._安全签名文本(值)
                 except Exception:
                     pass
                 详情[成员名] = 类型
         except Exception:
             详情 = {}
+            签名详情 = {}
 
         self._py_module_member_detail_cache[名称] = dict(详情)
+        self._py_module_member_signature_cache[名称] = dict(签名详情)
         return 详情
 
-    def _收集补全上下文(self, 全文, tab_id=None):
+    def _获取模块补全成员签名(self, 模块名, tab_id=None):
+        名称 = str(模块名 or "").strip()
+        if not 名称:
+            return {}
+
+        内置导出 = self._builtin_module_exports()
+        if 名称 in 内置导出:
+            return {成员名: self._builtin_signature_of(成员名) for 成员名 in 内置导出.get(名称, [])}
+
+        if 名称 == "魔法生态库":
+            return {词: self._builtin_signature_of(词) for 词 in self.builtin_words}
+
+        本地路径 = self._语义定位易码模块(名称, tab_id=tab_id)
+        if 本地路径:
+            签名表, _ = self._语义读取模块导出签名(本地路径)
+            return dict(签名表 or {})
+
+        if 名称 in self._py_module_member_signature_cache:
+            return dict(self._py_module_member_signature_cache.get(名称, {}))
+
+        签名详情 = {}
+        try:
+            模块对象 = importlib.import_module(名称)
+            for 成员名 in dir(模块对象):
+                成员名 = str(成员名)
+                if not 成员名 or 成员名.startswith("_"):
+                    continue
+                try:
+                    值 = getattr(模块对象, 成员名)
+                except Exception:
+                    continue
+                if callable(值):
+                    签名详情[成员名] = self._安全签名文本(值)
+        except Exception:
+            签名详情 = {}
+
+        self._py_module_member_signature_cache[名称] = dict(签名详情)
+        return 签名详情
+
+    def _收集补全上下文(self, 全文, tab_id=None, 光标行=None):
         标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
         内容 = 全文 or ""
         局部词 = set(re.findall(r'[\u4e00-\u9fa5A-Za-z0-9_]{2,}', 内容))
         功能名 = set(re.findall(rf'^\s*功能\s+({标识符模式})', 内容, re.MULTILINE))
         图纸名 = set(re.findall(rf'^\s*定义图纸\s+({标识符模式})', 内容, re.MULTILINE))
         变量名 = set(re.findall(rf'^\s*({标识符模式})\s*=', 内容, re.MULTILINE))
+        功能签名, 图纸签名 = self._提取定义签名(内容)
+        当前局部变量 = self._提取当前作用域局部变量(内容, 光标行)
         引入别名 = self._提取引入别名映射(内容)
         引入模块名 = {str(模块名).strip() for 模块名 in 引入别名.values() if str(模块名).strip()}
         对象成员历史 = {}
@@ -2837,8 +3856,10 @@ class 易码IDE:
 
         别名成员映射 = {}
         别名成员类型映射 = {}
+        别名成员签名映射 = {}
         导入导出平铺 = set()
         导入导出类型 = {}
+        导入导出签名 = {}
         类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0, "builtin": 0}
 
         def 合并导入类型(名称, 类型):
@@ -2848,67 +3869,91 @@ class 易码IDE:
             if 类型优先级.get(类型, 0) >= 类型优先级.get(当前, 0):
                 导入导出类型[名称] = 类型
 
+        def 合并导入签名(名称, 签名):
+            if 名称 and 签名 and not 导入导出签名.get(名称):
+                导入导出签名[名称] = 签名
+
         for 别名, 模块名 in 引入别名.items():
             成员详情 = self._获取模块补全成员详情(模块名, tab_id=tab_id)
+            成员签名 = self._获取模块补全成员签名(模块名, tab_id=tab_id)
             if 成员详情:
                 别名成员类型映射[别名] = dict(成员详情)
                 成员集 = set(成员详情.keys())
                 别名成员映射[别名] = 成员集
+                别名成员签名映射[别名] = dict(成员签名 or {})
                 导入导出平铺.update(成员集)
                 for 成员名, 成员类型 in 成员详情.items():
                     合并导入类型(成员名, 成员类型)
+                    合并导入签名(成员名, (成员签名 or {}).get(成员名, ""))
             else:
                 成员集 = self._获取模块补全成员(模块名, tab_id=tab_id)
                 if 成员集:
                     别名成员映射[别名] = set(成员集)
+                    别名成员签名映射[别名] = dict(成员签名 or {})
                     导入导出平铺.update(成员集)
                     for 成员名 in 成员集:
                         合并导入类型(成员名, "member")
+                        合并导入签名(成员名, (成员签名 or {}).get(成员名, ""))
 
         return {
             "局部词": 局部词,
             "功能名": 功能名,
             "图纸名": 图纸名,
             "变量名": 变量名,
+            "当前局部变量": 当前局部变量,
+            "功能签名": 功能签名,
+            "图纸签名": 图纸签名,
             "引入别名": 引入别名,
             "引入模块名": 引入模块名,
             "别名成员映射": 别名成员映射,
             "别名成员类型映射": 别名成员类型映射,
+            "别名成员签名映射": 别名成员签名映射,
             "对象成员历史": 对象成员历史,
             "导入导出平铺": 导入导出平铺,
             "导入导出类型": 导入导出类型,
+            "导入导出签名": 导入导出签名,
         }
 
     def _展示自动补全候选(self, editor, 排序候选):
-        self.autocomplete_listbox.delete(0, tk.END)
         self._autocomplete_items = []
-        显示文本列表 = []
+        self._autocomplete_row_ids = []
+        try:
+            for 行id in self.autocomplete_tree.get_children():
+                self.autocomplete_tree.delete(行id)
+        except tk.TclError:
+            pass
+        显示内容列表 = []
+        显示标签列表 = []
 
         标签映射 = {
             "snippet": "模板",
-            "builtin": "内置",
+            "builtin": "内置能力",
+            "builtin_func": "内置功能",
+            "keyword": "关键字",
             "function": "功能",
             "blueprint": "图纸",
             "alias": "模块别名",
-            "module": "模块",
-            "member": "成员",
-            "member_func": "成员-功能",
-            "member_blueprint": "成员-图纸",
-            "member_class": "成员-类",
-            "member_var": "成员-变量",
-            "member_alias": "成员-别名",
-            "imported": "导出",
-            "imported_func": "导出-功能",
-            "imported_blueprint": "导出-图纸",
-            "imported_class": "导出-类",
-            "imported_var": "导出-变量",
-            "imported_alias": "导出-别名",
+            "module": "模块名",
+            "member": "模块成员",
+            "member_func": "模块功能",
+            "member_blueprint": "模块图纸",
+            "member_class": "模块类",
+            "member_var": "模块变量",
+            "member_alias": "模块别名",
+            "imported": "已引入",
+            "imported_func": "已引入功能",
+            "imported_blueprint": "已引入图纸",
+            "imported_class": "已引入类",
+            "imported_var": "已引入变量",
+            "imported_alias": "已引入别名",
             "variable": "变量",
-            "local_word": "上下文",
+            "local_word": "上下文词",
         }
         颜色映射 = {
             "snippet": "#9CDCFE",
             "builtin": "#DCDCAA",
+            "builtin_func": "#DCDCAA",
+            "keyword": "#C586C0",
             "function": "#4FC1FF",
             "blueprint": "#C586C0",
             "alias": "#B5CEA8",
@@ -2929,14 +3974,35 @@ class 易码IDE:
             "local_word": "#9AA6B2",
         }
 
-        for 行号, (_, 来源, 词) in enumerate(排序候选[:24]):
+        for 行号, 候选 in enumerate(排序候选[:28]):
+            if isinstance(候选, dict):
+                来源 = str(候选.get("source", "")).strip()
+                词 = str(候选.get("insert", "")).strip()
+                签名 = str(候选.get("sig", "")).strip()
+                可调用 = bool(候选.get("callable", False))
+            else:
+                来源 = str(候选[1] if len(候选) > 1 else "").strip()
+                词 = str(候选[2] if len(候选) > 2 else "").strip()
+                签名 = str(候选[3] if len(候选) > 3 else "").strip()
+                可调用 = bool(候选[4]) if len(候选) > 4 else False
+            if not 词:
+                continue
             标签 = 标签映射.get(来源, "上下文")
-            显示文本 = f"    [{标签}]  {词}"
-            self.autocomplete_listbox.insert(tk.END, 显示文本)
-            self._autocomplete_items.append({"insert": 词, "source": 来源})
-            显示文本列表.append(显示文本)
+            显示内容 = f"{词}{签名}" if 签名 else 词
+            self._autocomplete_items.append({
+                "insert": 词,
+                "source": 来源,
+                "sig": 签名,
+                "callable": 可调用,
+            })
+            显示标签列表.append(标签)
+            显示内容列表.append(显示内容)
             try:
-                self.autocomplete_listbox.itemconfig(行号, foreground=颜色映射.get(来源, self.theme_fg))
+                行id = f"ac_{len(self._autocomplete_row_ids)}"
+                标签名 = f"src_{来源}" if 来源 else "src_default"
+                self.autocomplete_tree.insert("", "end", iid=行id, values=(标签, 显示内容), tags=(标签名,))
+                self._autocomplete_row_ids.append(行id)
+                self.autocomplete_tree.tag_configure(标签名, foreground=颜色映射.get(来源, self.theme_fg))
             except tk.TclError:
                 pass
 
@@ -2944,8 +4010,11 @@ class 易码IDE:
             self._hide_autocomplete()
             return
 
-        self.autocomplete_listbox.selection_set(0)
-        self.autocomplete_listbox.activate(0)
+        self._autocomplete_select_index(0)
+        try:
+            self._autocomplete_popup_line = editor.index("insert").split(".")[0]
+        except Exception:
+            self._autocomplete_popup_line = None
 
         bbox = editor.bbox("insert")
         if not bbox:
@@ -2956,30 +4025,90 @@ class 易码IDE:
         root_y = editor.winfo_rooty() - self.root.winfo_rooty() + y + height + 5
 
         try:
-            字体对象 = tkfont.Font(font=self.autocomplete_listbox.cget("font"))
-            最大行宽 = max((字体对象.measure(t) for t in 显示文本列表), default=260)
-            目标宽度 = max(320, 最大行宽 + 28)
-            可用宽度 = max(260, self.root.winfo_width() - root_x - 12)
-            列表宽度 = min(目标宽度, 可用宽度)
-            if root_x + 列表宽度 > self.root.winfo_width() - 8:
-                root_x = max(8, self.root.winfo_width() - 列表宽度 - 8)
+            self.root.update_idletasks()
+            字体对象 = tkfont.Font(font=self.font_code)
+            最大标签宽 = max((字体对象.measure(t) for t in 显示标签列表), default=80)
+            最大内容宽 = max((字体对象.measure(t) for t in 显示内容列表), default=260)
+            类型列宽 = max(92, min(180, 最大标签宽 + 28))
+            内容列宽 = max(260, 最大内容宽 + 28)
+            根宽度 = max(420, int(self.root.winfo_width()))
+            目标宽度 = max(420, 类型列宽 + 内容列宽 + 26)
+            可用最大宽度 = max(320, 根宽度 - 16)
+            列表宽度 = min(目标宽度, 可用最大宽度)
+            if root_x + 列表宽度 > 根宽度 - 8:
+                root_x = max(8, 根宽度 - 列表宽度 - 8)
 
             行高 = max(20, 字体对象.metrics("linespace") + 6)
             可见行数 = min(max(4, len(self._autocomplete_items)), 10)
-            列表高度 = max(140, 行高 * 可见行数 + 6)
-            self.autocomplete_listbox.place(x=root_x, y=root_y, width=列表宽度, height=列表高度)
+            标题高度 = 26
+            水平滚动条高度 = max(12, int(16 * self.dpi_scale))
+            列表高度 = max(140, 标题高度 + 行高 * 可见行数 + 水平滚动条高度 + 8)
+
+            最终内容列宽 = max(180, 列表宽度 - 类型列宽 - 20)
+            self.autocomplete_tree.column("kind", width=类型列宽, minwidth=88, stretch=False)
+            self.autocomplete_tree.column("item", width=最终内容列宽, minwidth=180, stretch=True)
+            self.autocomplete_popup.place(x=root_x, y=root_y, width=列表宽度, height=列表高度)
         except Exception:
-            self.autocomplete_listbox.place(x=root_x, y=root_y)
-        self.autocomplete_listbox.lift()
+            self.autocomplete_popup.place(x=root_x, y=root_y)
+        self.autocomplete_popup.lift()
+
+    def _get_context_snippets(self, editor):
+        """检测光标前的代码块类型，返回上下文相关的 snippet 建议列表。
+        返回格式: set of snippet names that should be boosted."""
+        try:
+            cursor_line = int(editor.index("insert").split(".")[0])
+        except Exception:
+            return set()
+
+        # 上下文关联规则：前面的代码块 → 建议的后续 snippet
+        上下文规则 = {
+            "如果": {"否则如果", "不然"},
+            "否则如果": {"否则如果", "不然"},
+            "尝试": {"如果出错"},
+        }
+
+        # 获取当前行的缩进级别
+        try:
+            当前行文本 = editor.get(f"{cursor_line}.0", f"{cursor_line}.end")
+            当前缩进 = len(当前行文本) - len(当前行文本.lstrip())
+        except Exception:
+            当前缩进 = 0
+
+        # 向上扫描，寻找同级或更低缩进级别的代码块头
+        for i in range(cursor_line - 1, max(0, cursor_line - 30), -1):
+            try:
+                行文本 = editor.get(f"{i}.0", f"{i}.end")
+            except Exception:
+                continue
+            stripped = 行文本.strip()
+            if not stripped:
+                continue
+            行缩进 = len(行文本) - len(行文本.lstrip())
+
+            # 如果遇到同级或更低缩进的代码行
+            if 行缩进 <= 当前缩进:
+                for 关键词, 建议集 in 上下文规则.items():
+                    if stripped.startswith(关键词):
+                        return 建议集
+                # 遇到了同级但不匹配的行，停止搜索
+                break
+
+        return set()
 
     def _check_autocomplete(self, event=None):
         # 排除 Ctrl 组合键（手动触发除外）
         if event and (event.state & 0x4):
             self._hide_autocomplete()
+            self._hide_calltip()
             return
-        if event and event.keysym in ("Up", "Down", "Left", "Right", "Return", "Tab", "Escape"):
+        if event and event.keysym in ("Up", "Down", "Left", "Right", "Prior", "Next", "Return", "KP_Enter", "Tab", "Escape"):
             if event.keysym == "Escape":
                 self._hide_autocomplete()
+                self._hide_calltip()
+            elif event.keysym in ("Left", "Right", "Up", "Down", "Prior", "Next"):
+                self._schedule_calltip_update()
+            elif event.keysym in ("Return", "KP_Enter", "Tab"):
+                self._schedule_calltip_update()
             return
 
         editor = self._get_current_editor()
@@ -2989,8 +4118,13 @@ class 易码IDE:
 
         全文 = editor.get("1.0", "end-1c")
         行前文本 = editor.get("insert linestart", "insert")
+        try:
+            光标行 = int(editor.index("insert").split(".")[0])
+        except Exception:
+            光标行 = 1
         标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        上下文 = self._收集补全上下文(全文, tab_id=tab_id)
+        上下文 = self._收集补全上下文(全文, tab_id=tab_id, 光标行=光标行)
+        self._update_calltip(editor=editor, tab_id=tab_id, 全文=全文, 行前文本=行前文本, 上下文=上下文)
 
         点号匹配 = re.search(rf'({标识符模式})\.([\u4e00-\u9fa5A-Za-z0-9_]*)$', 行前文本)
         if 点号匹配:
@@ -2999,16 +4133,20 @@ class 易码IDE:
             成员候选集合 = set(上下文["别名成员映射"].get(对象名, set()))
             成员候选集合.update(上下文.get("对象成员历史", {}).get(对象名, set()))
             成员类型映射 = dict(上下文.get("别名成员类型映射", {}).get(对象名, {}))
+            成员签名映射 = dict(上下文.get("别名成员签名映射", {}).get(对象名, {}))
 
             if not 成员候选集合:
                 跨标签模块 = self._跨标签查别名模块(对象名, 当前tab_id=tab_id)
                 if 跨标签模块:
                     跨标签详情 = self._获取模块补全成员详情(跨标签模块, tab_id=tab_id)
+                    跨标签签名 = self._获取模块补全成员签名(跨标签模块, tab_id=tab_id)
                     if 跨标签详情:
                         成员候选集合.update(跨标签详情.keys())
                         成员类型映射.update(跨标签详情)
+                        成员签名映射.update(跨标签签名 or {})
                     else:
                         成员候选集合.update(self._获取模块补全成员(跨标签模块, tab_id=tab_id))
+                        成员签名映射.update(跨标签签名 or {})
 
             成员候选 = sorted(成员候选集合)
             if not 成员候选:
@@ -3029,7 +4167,13 @@ class 易码IDE:
                 基础分 = 0 if (成员前缀 and 成员名.startswith(成员前缀)) else (0.2 if not 成员前缀 else 1.8)
                 成员类型 = 成员类型映射.get(成员名, "member")
                 成员来源 = 类型到来源.get(成员类型, "member")
-                排名列表.append((基础分 + len(成员名) / 260.0, 成员来源, 成员名))
+                排名列表.append({
+                    "score": 基础分 + len(成员名) / 260.0,
+                    "source": 成员来源,
+                    "insert": 成员名,
+                    "sig": str(成员签名映射.get(成员名, "") or ""),
+                    "callable": 成员类型 in {"function", "class"},
+                })
 
             if not 排名列表:
                 self._hide_autocomplete()
@@ -3037,7 +4181,7 @@ class 易码IDE:
 
             self._autocomplete_replace_start = "insert" if not 成员前缀 else f"insert - {len(成员前缀)}c"
             self._autocomplete_replace_end = "insert"
-            self._展示自动补全候选(editor, sorted(排名列表, key=lambda x: (x[0], x[2])))
+            self._展示自动补全候选(editor, sorted(排名列表, key=lambda x: (x["score"], x["insert"])))
             return
 
         普通匹配 = re.search(rf'({标识符模式})$', 行前文本)
@@ -3050,35 +4194,62 @@ class 易码IDE:
             self._hide_autocomplete()
             return
 
+        功能签名 = 上下文.get("功能签名", {})
+        图纸签名 = 上下文.get("图纸签名", {})
+        导入签名 = 上下文.get("导入导出签名", {})
+        当前局部变量 = 上下文.get("当前局部变量", set()) or set()
         候选映射 = {}
 
-        def 加候选(词, 来源, 基础分):
+        def 加候选(词, 来源, 基础分, 签名="", 可调用=False):
             if not self._autocomplete_match(词, 当前词):
                 return
             分数 = 基础分
-            if 词.startswith(当前词):
+            if 词 == 当前词:
+                分数 -= 1.1
+            elif 词.startswith(当前词):
                 分数 -= 0.4
             分数 += len(词) / 260.0
             旧 = 候选映射.get(词)
-            if 旧 is None or 分数 < 旧[0]:
-                候选映射[词] = (分数, 来源, 词)
+            新项 = {
+                "score": 分数,
+                "source": 来源,
+                "insert": 词,
+                "sig": str(签名 or ""),
+                "callable": bool(可调用),
+            }
+            if 旧 is None or 分数 < 旧["score"]:
+                候选映射[词] = 新项
+            elif 旧 is not None:
+                if (not 旧.get("sig")) and 新项.get("sig"):
+                    旧["sig"] = 新项["sig"]
+                if 新项.get("callable") and not 旧.get("callable"):
+                    旧["callable"] = True
+
+        上下文建议 = self._get_context_snippets(editor)
 
         for 词 in self.autocomplete_words:
             if 词 in self.snippets:
-                加候选(词, "snippet", -0.2)
+                # 上下文相关的 snippet 排在最前面
+                分数 = -1.5 if 词 in 上下文建议 else -0.2
+                加候选(词, "snippet", 分数, 可调用=False)
+            elif 词 in self.builtin_words:
+                加候选(词, "builtin_func", 0.08, 签名=self._builtin_signature_of(词), 可调用=True)
             else:
-                加候选(词, "builtin", 0.2)
+                # 上下文相关的关键词也排在前面（如 尝试 后面的 如果出错）
+                分数 = -1.5 if 词 in 上下文建议 else 0.26
+                加候选(词, "keyword", 分数, 可调用=False)
 
         for 词 in 上下文["功能名"]:
-            加候选(词, "function", 0.1)
+            加候选(词, "function", 0.05, 签名=功能签名.get(词, "()"), 可调用=True)
         for 词 in 上下文["图纸名"]:
-            加候选(词, "blueprint", 0.12)
+            加候选(词, "blueprint", 0.09, 签名=图纸签名.get(词, "()"), 可调用=False)
         for 词 in 上下文["变量名"]:
-            加候选(词, "variable", 0.45)
+            权重 = 0.02 if 词 in 当前局部变量 else 0.35
+            加候选(词, "variable", 权重, 可调用=False)
         for 词 in 上下文["引入别名"].keys():
-            加候选(词, "alias", 0.18)
+            加候选(词, "alias", 0.12, 可调用=False)
         for 词 in 上下文.get("引入模块名", set()):
-            加候选(词, "module", 0.28)
+            加候选(词, "module", 0.22, 可调用=False)
         导入类型 = 上下文.get("导入导出类型", {})
         导入类型到来源 = {
             "function": "imported_func",
@@ -3089,10 +4260,12 @@ class 易码IDE:
         }
         for 词 in 上下文["导入导出平铺"]:
             词类型 = 导入类型.get(词, "member")
-            加候选(词, 导入类型到来源.get(词类型, "imported"), 0.52)
+            来源 = 导入类型到来源.get(词类型, "imported")
+            可调用 = 词类型 in {"function", "class"}
+            加候选(词, 来源, 0.46, 签名=导入签名.get(词, ""), 可调用=可调用)
         for 词 in 上下文["局部词"]:
             if 词 not in self.autocomplete_words:
-                加候选(词, "local_word", 0.7)
+                加候选(词, "local_word", 0.7, 可调用=False)
 
         if not 候选映射:
             self._hide_autocomplete()
@@ -3100,78 +4273,56 @@ class 易码IDE:
 
         self._autocomplete_replace_start = f"insert - {len(当前词)}c"
         self._autocomplete_replace_end = "insert"
-        排序后 = sorted(候选映射.values(), key=lambda x: (x[0], x[2]))
+        排序后 = sorted(候选映射.values(), key=lambda x: (x["score"], x["insert"]))
         self._展示自动补全候选(editor, 排序后)
 
     def _handle_autocomplete_nav(self, event):
-        if not self.autocomplete_listbox.winfo_ismapped():
+        if not self._autocomplete_is_visible():
             return # 交给系统默认处理
 
-        总数 = self.autocomplete_listbox.size()
+        总数 = len(self._autocomplete_row_ids)
         if 总数 <= 0:
             return "break"
 
-        current_selection = self.autocomplete_listbox.curselection()
-        if current_selection:
-            idx = int(current_selection[0])
-        else:
-            try:
-                idx = int(self.autocomplete_listbox.index("active"))
-            except tk.TclError:
-                idx = 0
-            idx = max(0, min(总数 - 1, idx))
-        self.autocomplete_listbox.selection_clear(0, tk.END)
-        
+        idx = self._autocomplete_current_index()
+         
         if event.keysym == 'Up':
             idx = max(0, idx - 1)
         elif event.keysym == 'Down':
             idx = min(总数 - 1, idx + 1)
-            
-        self.autocomplete_listbox.selection_set(idx)
-        self.autocomplete_listbox.activate(idx)
-        self.autocomplete_listbox.see(idx)
+        elif event.keysym == 'Prior':
+            idx = max(0, idx - 8)
+        elif event.keysym == 'Next':
+            idx = min(总数 - 1, idx + 8)
+             
+        self._autocomplete_select_index(idx)
         return "break" # 阻止光标移动
 
-    def _handle_autocomplete_accept(self, event):
-        if self.autocomplete_listbox.winfo_ismapped():
-            self._accept_autocomplete()
-            return "break" # 阻止真实回车换行发生
-
     def _accept_autocomplete(self, event=None):
-        if not self.autocomplete_listbox.winfo_ismapped():
-            return
+        if not self._autocomplete_is_visible():
+            return "break"
+        self._autocomplete_mouse_down = False
 
-        idx = None
-        if event is not None and hasattr(event, "y"):
-            try:
-                idx = int(self.autocomplete_listbox.nearest(event.y))
-            except tk.TclError:
-                idx = None
+        idx = self._autocomplete_index_from_event(event)
         if idx is None:
-            selection = self.autocomplete_listbox.curselection()
-            if selection:
-                idx = int(selection[0])
-            else:
-                try:
-                    idx = int(self.autocomplete_listbox.index("active"))
-                except tk.TclError:
-                    idx = 0
+            idx = self._autocomplete_current_index()
 
         if idx < 0 or idx >= len(self._autocomplete_items):
             self._hide_autocomplete()
-            return
+            return "break"
 
         当前候选 = self._autocomplete_items[idx]
         selected_word = str(当前候选.get("insert", "")).strip()
         selected_source = str(当前候选.get("source", "")).strip()
+        selected_callable = bool(当前候选.get("callable", False))
         if not selected_word:
             self._hide_autocomplete()
-            return
+            return "break"
 
         editor = self._get_current_editor()
         if not editor:
             self._hide_autocomplete()
-            return
+            return "break"
 
         start_index = self._autocomplete_replace_start
         end_index = self._autocomplete_replace_end or "insert"
@@ -3184,14 +4335,33 @@ class 易码IDE:
                 start_index = "insert"
 
         try:
+            insert_pos = editor.index("insert")
             start_pos = editor.index(start_index)
             end_pos = editor.index(end_index)
+
+            当前行 = insert_pos.split(".")[0]
+            起始行 = start_pos.split(".")[0]
+            结束行 = end_pos.split(".")[0]
+            跨行或错序 = (
+                起始行 != 当前行
+                or 结束行 != 当前行
+                or editor.compare(start_pos, ">", end_pos)
+            )
+            if 跨行或错序:
+                line_text = editor.get("insert linestart", "insert")
+                match = re.search(r'([\u4e00-\u9fa5A-Za-z0-9_]+)$', line_text)
+                if match:
+                    start_pos = editor.index(f"insert - {len(match.group(1))}c")
+                else:
+                    start_pos = insert_pos
+                end_pos = insert_pos
+
             editor.delete(start_pos, end_pos)
             editor.insert(start_pos, selected_word)
             末尾位置 = editor.index(f"{start_pos} + {len(selected_word)}c")
 
-            自动补括号来源 = {"function", "member", "member_func", "imported", "imported_func"}
-            if selected_source in 自动补括号来源:
+            自动补括号来源 = {"function", "member", "member_func", "imported", "imported_func", "builtin_func", "member_class", "imported_class"}
+            if selected_callable or (selected_source in 自动补括号来源):
                 下一个字符 = editor.get(末尾位置, f"{末尾位置}+1c")
                 if 下一个字符 != "(":
                     editor.insert(末尾位置, "()")
@@ -3201,11 +4371,14 @@ class 易码IDE:
             else:
                 editor.mark_set("insert", 末尾位置)
 
+            editor.focus_set()
             self.highlight()
         except tk.TclError:
             pass
 
         self._hide_autocomplete()
+        self._schedule_calltip_update()
+        return "break"
 
     def bind_global_shortcuts(self):
         self.root.bind("<Control-s>", self._shortcut_save)
@@ -3297,7 +4470,7 @@ class 易码IDE:
 
         old_name = self._get_symbol_near_cursor(editor)
         if not old_name:
-            messagebox.showinfo("重命名符号", "请先把光标放到一个变量/函数/图纸名称上，或先选中一个名称。")
+            messagebox.showinfo("重命名符号", "请先把光标放到一个变量/功能/图纸名称上，或先选中一个名称。")
             return "break"
 
         new_name = simpledialog.askstring(
@@ -4183,10 +5356,29 @@ class 易码IDE:
                 return "break"
             return None
 
+        def 左侧点击同步光标(event):
+            try:
+                目标索引 = editor.index(f"@0,{event.y}")
+            except tk.TclError:
+                return "break"
+            try:
+                editor.focus_set()
+                editor.mark_set("insert", 目标索引)
+                editor.tag_remove("sel", "1.0", "end")
+                self._hide_autocomplete()
+                self._hide_calltip()
+                self._highlight_current_line()
+                self._update_cursor_status()
+            except tk.TclError:
+                pass
+            return "break"
+
         for 左侧控件 in (line_numbers, guide_canvas):
             左侧控件.bind("<MouseWheel>", 左侧滚轮转发到编辑器)
             左侧控件.bind("<Button-4>", 左侧滚轮转发到编辑器)
             左侧控件.bind("<Button-5>", 左侧滚轮转发到编辑器)
+            左侧控件.bind("<Button-1>", 左侧点击同步光标)
+            左侧控件.bind("<ButtonRelease-1>", 左侧点击同步光标, add="+")
         
         # 插入内容
         editor.insert("1.0", content)

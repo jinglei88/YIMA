@@ -124,8 +124,16 @@ class 解释器:
         根环境 = self._获取根环境(环境上下文)
         导出映射 = {
             "文件管理": ["读文件", "写文件", "追加文件"],
-            "系统工具": ["文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录", "拼路径", "绝对路径", "当前目录"],
-            "数据工具": ["解析JSON", "生成JSON", "读JSON", "写JSON"],
+            "系统工具": [
+                "文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录",
+                "复制文件", "移动文件", "重命名", "遍历文件",
+                "复制目录", "压缩目录", "解压缩", "哈希文本", "哈希文件", "下载文件",
+                "匹配文件", "文件信息", "目录大小",
+                "格式时间", "解析时间", "写日志", "读日志", "睡眠",
+                "拼路径", "绝对路径", "当前目录",
+                "读环境变量", "写环境变量", "执行命令",
+            ],
+            "数据工具": ["解析JSON", "生成JSON", "读JSON", "写JSON", "读CSV", "写CSV", "读INI", "写INI"],
             "网络请求": ["发起请求", "发GET", "发POST", "发GET_JSON", "发POST_JSON", "读响应JSON"],
             "本地数据库": ["打开数据库", "执行SQL", "查询SQL", "关闭数据库", "开始事务", "提交事务", "回滚事务"],
             "图形界面": [
@@ -269,21 +277,431 @@ class 解释器:
                 return False
             shutil.rmtree(路径文本)
             return True
+        def 复制文件(源路径, 目标路径, 覆盖=True):
+            import shutil
+            源路径文本 = str(源路径)
+            目标路径文本 = str(目标路径)
+            if not os.path.isfile(源路径文本):
+                return False
+            if os.path.exists(目标路径文本) and not bool(覆盖):
+                return False
+            父目录 = os.path.dirname(os.path.abspath(目标路径文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            shutil.copy2(源路径文本, 目标路径文本)
+            return True
+        def 移动文件(源路径, 目标路径, 覆盖=True):
+            import shutil
+            源路径文本 = str(源路径)
+            目标路径文本 = str(目标路径)
+            if not os.path.exists(源路径文本):
+                return False
+            if os.path.exists(目标路径文本):
+                if not bool(覆盖):
+                    return False
+                if os.path.isdir(目标路径文本):
+                    shutil.rmtree(目标路径文本)
+                else:
+                    os.remove(目标路径文本)
+            父目录 = os.path.dirname(os.path.abspath(目标路径文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            shutil.move(源路径文本, 目标路径文本)
+            return True
+        def 重命名(原路径, 新路径, 覆盖=True):
+            import shutil
+            原路径文本 = str(原路径)
+            新路径文本 = str(新路径)
+            if not os.path.exists(原路径文本):
+                return False
+            if os.path.exists(新路径文本):
+                if not bool(覆盖):
+                    return False
+                if os.path.isdir(新路径文本):
+                    shutil.rmtree(新路径文本)
+                else:
+                    os.remove(新路径文本)
+            父目录 = os.path.dirname(os.path.abspath(新路径文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            os.rename(原路径文本, 新路径文本)
+            return True
+        def 遍历文件(路径, 递归=True):
+            路径文本 = str(路径) if 路径 is not None else "."
+            if not os.path.isdir(路径文本):
+                return []
+            结果 = []
+            if bool(递归):
+                for 当前目录, _, 文件列表 in os.walk(路径文本):
+                    for 文件名 in 文件列表:
+                        结果.append(os.path.join(当前目录, 文件名))
+            else:
+                for 名称 in os.listdir(路径文本):
+                    候选 = os.path.join(路径文本, 名称)
+                    if os.path.isfile(候选):
+                        结果.append(候选)
+            return sorted(结果)
+        def 复制目录(源目录, 目标目录, 覆盖=True):
+            import shutil
+            源目录文本 = str(源目录)
+            目标目录文本 = str(目标目录)
+            if not os.path.isdir(源目录文本):
+                return False
+            if os.path.exists(目标目录文本):
+                if not bool(覆盖):
+                    return False
+                if os.path.isdir(目标目录文本):
+                    shutil.rmtree(目标目录文本)
+                else:
+                    os.remove(目标目录文本)
+            父目录 = os.path.dirname(os.path.abspath(目标目录文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            shutil.copytree(源目录文本, 目标目录文本)
+            return True
+        def 压缩目录(源目录, 压缩包路径):
+            import zipfile
+            源目录文本 = str(源目录)
+            压缩包文本 = str(压缩包路径)
+            if not os.path.isdir(源目录文本):
+                return False
+            父目录 = os.path.dirname(os.path.abspath(压缩包文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            with zipfile.ZipFile(压缩包文本, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for 当前目录, _, 文件列表 in os.walk(源目录文本):
+                    for 文件名 in 文件列表:
+                        完整路径 = os.path.join(当前目录, 文件名)
+                        相对路径 = os.path.relpath(完整路径, 源目录文本)
+                        zf.write(完整路径, arcname=相对路径)
+            return True
+        def 解压缩(压缩包路径, 目标目录):
+            import zipfile
+            压缩包文本 = str(压缩包路径)
+            目标目录文本 = str(目标目录)
+            if not os.path.isfile(压缩包文本):
+                return False
+            os.makedirs(目标目录文本, exist_ok=True)
+            with zipfile.ZipFile(压缩包文本, "r") as zf:
+                zf.extractall(目标目录文本)
+            return True
+        def 哈希文本(文本, 算法="sha256"):
+            import hashlib
+            算法名 = str(算法).strip().lower() if 算法 else "sha256"
+            if not 算法名:
+                算法名 = "sha256"
+            if 算法名 not in hashlib.algorithms_available:
+                算法名 = "sha256"
+            计算器 = hashlib.new(算法名)
+            计算器.update(str(文本).encode("utf-8"))
+            return 计算器.hexdigest()
+        def 哈希文件(路径, 算法="sha256"):
+            import hashlib
+            路径文本 = str(路径)
+            if not os.path.isfile(路径文本):
+                return ""
+            算法名 = str(算法).strip().lower() if 算法 else "sha256"
+            if not 算法名:
+                算法名 = "sha256"
+            if 算法名 not in hashlib.algorithms_available:
+                算法名 = "sha256"
+            计算器 = hashlib.new(算法名)
+            with open(路径文本, "rb") as f:
+                while True:
+                    块 = f.read(8192)
+                    if not 块:
+                        break
+                    计算器.update(块)
+            return 计算器.hexdigest()
+        def 下载文件(网址, 保存路径, 超时秒=30, 断点续传=True, 进度回调=None, 块大小=65536):
+            from urllib import request as _req
+            from urllib.error import HTTPError, URLError
+            import time
+
+            目标网址 = str(网址).strip()
+            保存路径文本 = str(保存路径).strip()
+            if not 目标网址 or not 保存路径文本:
+                return {"成功": False, "状态码": 0, "路径": 保存路径文本, "错误": "网址和保存路径不能为空"}
+
+            try:
+                超时值 = max(0.1, float(超时秒))
+            except Exception:
+                超时值 = 30.0
+            try:
+                块大小值 = max(4096, int(块大小))
+            except Exception:
+                块大小值 = 65536
+
+            def 触发进度回调(已下载字节, 总字节):
+                if 进度回调 is None:
+                    return
+                总字节值 = int(总字节) if 总字节 else 0
+                if 总字节值 > 0:
+                    百分比 = round(float(已下载字节) * 100.0 / float(总字节值), 2)
+                else:
+                    百分比 = 0.0
+                参数候选 = [int(已下载字节), 总字节值, float(百分比)]
+                # 兼容 Python 可调用对象
+                if hasattr(进度回调, "__call__") and not isinstance(进度回调, 易码函数):
+                    for 参数个数 in (3, 2, 1, 0):
+                        try:
+                            if 参数个数 == 0:
+                                进度回调()
+                            else:
+                                进度回调(*参数候选[:参数个数])
+                            return
+                        except TypeError:
+                            continue
+                        except Exception:
+                            return
+                    return
+                # 兼容易码功能对象
+                try:
+                    回调函数对象 = self._转成易码函数对象(进度回调, self.全局环境)
+                    if not 回调函数对象:
+                        return
+                    参数需求数 = len(getattr(回调函数对象, "参数列表", []) or [])
+                    参数需求数 = max(0, min(参数需求数, 3))
+                    调用参数 = 参数候选[:参数需求数] if 参数需求数 > 0 else []
+                    self._执行易码函数对象(回调函数对象, 调用参数, 0)
+                except Exception:
+                    return
+
+            try:
+                父目录 = os.path.dirname(os.path.abspath(保存路径文本))
+                if 父目录:
+                    os.makedirs(父目录, exist_ok=True)
+
+                已存在字节 = 0
+                准备续传 = bool(断点续传) and os.path.isfile(保存路径文本)
+                if 准备续传:
+                    try:
+                        已存在字节 = max(0, int(os.path.getsize(保存路径文本)))
+                    except Exception:
+                        已存在字节 = 0
+
+                请求对象 = _req.Request(目标网址)
+                if 已存在字节 > 0:
+                    请求对象.add_header("Range", f"bytes={已存在字节}-")
+
+                开始时间 = time.time()
+                with _req.urlopen(请求对象, timeout=超时值) as resp:
+                    状态码 = int(getattr(resp, "status", 200) or 200)
+                    续传生效 = (已存在字节 > 0 and 状态码 == 206)
+                    if 已存在字节 > 0 and not 续传生效:
+                        已存在字节 = 0
+
+                    写入模式 = "ab" if 续传生效 else "wb"
+                    内容长度头 = str(resp.headers.get("Content-Length", "") or "").strip()
+                    try:
+                        本次长度 = int(内容长度头) if 内容长度头 else 0
+                    except Exception:
+                        本次长度 = 0
+                    总字节数 = int(已存在字节 + 本次长度) if 本次长度 > 0 else 0
+
+                    已下载字节 = int(已存在字节)
+                    触发进度回调(已下载字节, 总字节数)
+                    with open(保存路径文本, 写入模式) as f:
+                        while True:
+                            块 = resp.read(块大小值)
+                            if not 块:
+                                break
+                            f.write(块)
+                            已下载字节 += len(块)
+                            触发进度回调(已下载字节, 总字节数)
+
+                    耗时毫秒 = int((time.time() - 开始时间) * 1000)
+                    return {
+                        "成功": True,
+                        "状态码": 状态码,
+                        "路径": 保存路径文本,
+                        "字节数": int(已下载字节),
+                        "总字节数": int(总字节数 if 总字节数 > 0 else 已下载字节),
+                        "续传": bool(续传生效),
+                        "耗时毫秒": 耗时毫秒,
+                    }
+            except HTTPError as e:
+                错误码 = int(getattr(e, "code", 0) or 0)
+                if 错误码 == 416 and bool(断点续传) and os.path.isfile(保存路径文本):
+                    try:
+                        已有大小 = int(os.path.getsize(保存路径文本))
+                    except Exception:
+                        已有大小 = 0
+                    return {
+                        "成功": True,
+                        "状态码": 206,
+                        "路径": 保存路径文本,
+                        "字节数": 已有大小,
+                        "总字节数": 已有大小,
+                        "续传": True,
+                        "耗时毫秒": 0,
+                    }
+                return {"成功": False, "状态码": 错误码, "路径": 保存路径文本, "错误": str(e)}
+            except URLError as e:
+                return {"成功": False, "状态码": 0, "路径": 保存路径文本, "错误": str(e)}
+            except Exception as e:
+                return {"成功": False, "状态码": 0, "路径": 保存路径文本, "错误": str(e)}
+        def 匹配文件(模式, 递归=True, 类型="全部", 包含文本="", 排除文本=""):
+            import glob
+            模式文本 = str(模式).strip()
+            if not 模式文本:
+                return []
+            结果 = sorted(glob.glob(模式文本, recursive=bool(递归)))
+            类型文本 = str(类型).strip() if 类型 is not None else "全部"
+            if 类型文本 in ("文件", "file", "f"):
+                结果 = [路径 for 路径 in 结果 if os.path.isfile(路径)]
+            elif 类型文本 in ("目录", "文件夹", "folder", "dir", "d"):
+                结果 = [路径 for 路径 in 结果 if os.path.isdir(路径)]
+
+            包含词 = str(包含文本).strip() if 包含文本 is not None else ""
+            排除词 = str(排除文本).strip() if 排除文本 is not None else ""
+            if 包含词:
+                结果 = [路径 for 路径 in 结果 if 包含词 in str(路径)]
+            if 排除词:
+                结果 = [路径 for 路径 in 结果 if 排除词 not in str(路径)]
+            return 结果
+        def 文件信息(路径):
+            import datetime
+            路径文本 = str(路径)
+            if not os.path.exists(路径文本):
+                return {"存在": False, "路径": os.path.abspath(路径文本)}
+            绝对路径文本 = os.path.abspath(路径文本)
+            类型文本 = "目录" if os.path.isdir(路径文本) else ("文件" if os.path.isfile(路径文本) else "其他")
+            统计 = os.stat(路径文本)
+            时间戳值 = float(统计.st_mtime)
+            return {
+                "存在": True,
+                "路径": 绝对路径文本,
+                "名称": os.path.basename(绝对路径文本),
+                "后缀": os.path.splitext(绝对路径文本)[1],
+                "类型": 类型文本,
+                "大小": int(统计.st_size),
+                "修改时间戳": 时间戳值,
+                "修改时间": datetime.datetime.fromtimestamp(时间戳值).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        def 目录大小(路径):
+            路径文本 = str(路径)
+            if not os.path.isdir(路径文本):
+                return 0
+            总大小 = 0
+            for 当前目录, _, 文件列表 in os.walk(路径文本):
+                for 文件名 in 文件列表:
+                    文件路径 = os.path.join(当前目录, 文件名)
+                    if os.path.isfile(文件路径):
+                        总大小 += os.path.getsize(文件路径)
+            return int(总大小)
+        def 格式时间(时间值=None, 格式="%Y-%m-%d %H:%M:%S"):
+            import datetime
+            时间格式 = str(格式) if 格式 else "%Y-%m-%d %H:%M:%S"
+            if 时间值 is None or 时间值 == "":
+                时间对象 = datetime.datetime.now()
+            else:
+                时间对象 = datetime.datetime.fromtimestamp(float(时间值))
+            return 时间对象.strftime(时间格式)
+        def 解析时间(时间文本, 格式="%Y-%m-%d %H:%M:%S"):
+            import datetime
+            时间格式 = str(格式) if 格式 else "%Y-%m-%d %H:%M:%S"
+            时间对象 = datetime.datetime.strptime(str(时间文本), 时间格式)
+            return int(时间对象.timestamp())
+        def 写日志(路径, 内容, 级别="信息"):
+            import datetime
+            路径文本 = str(路径)
+            父目录 = os.path.dirname(os.path.abspath(路径文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            时间文本 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            级别文本 = str(级别) if 级别 is not None else "信息"
+            行文本 = f"[{时间文本}] [{级别文本}] {内容}"
+            with open(路径文本, "a", encoding="utf-8") as f:
+                f.write(行文本 + "\n")
+            return 行文本
+        def 读日志(路径, 最大行数=200):
+            路径文本 = str(路径)
+            if not os.path.isfile(路径文本):
+                return []
+            行数上限 = int(最大行数) if 最大行数 is not None else 200
+            if 行数上限 <= 0:
+                return []
+            with open(路径文本, "r", encoding="utf-8") as f:
+                全部行 = f.readlines()
+            return [行.rstrip("\r\n") for 行 in 全部行[-行数上限:]]
+        def 睡眠(秒):
+            import time
+            time.sleep(max(0.0, float(秒)))
+            return True
         def 拼路径(*片段):
             return os.path.join(*(str(片) for 片 in 片段))
         def 绝对路径(路径):
             return os.path.abspath(str(路径))
         def 当前目录():
             return os.getcwd()
+        def 读环境变量(名称, 默认值=""):
+            return os.environ.get(str(名称), 默认值 if 默认值 is not None else "")
+        def 写环境变量(名称, 值):
+            os.environ[str(名称)] = str(值)
+            return os.environ.get(str(名称), "")
+        def 执行命令(命令, 超时秒=15, 工作目录=""):
+            import subprocess
+            命令文本 = str(命令).strip()
+            if not 命令文本:
+                return {"成功": False, "退出码": -1, "标准输出": "", "标准错误": "命令不能为空", "错误": "命令不能为空"}
+            try:
+                执行结果 = subprocess.run(
+                    命令文本,
+                    shell=True,
+                    cwd=str(工作目录) if 工作目录 else None,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=float(超时秒),
+                )
+                return {
+                    "成功": 执行结果.returncode == 0,
+                    "退出码": int(执行结果.returncode),
+                    "标准输出": 执行结果.stdout or "",
+                    "标准错误": 执行结果.stderr or "",
+                }
+            except subprocess.TimeoutExpired as e:
+                标准输出 = e.stdout or ""
+                标准错误 = e.stderr or ""
+                if isinstance(标准输出, (bytes, bytearray)):
+                    标准输出 = 标准输出.decode("utf-8", errors="replace")
+                if isinstance(标准错误, (bytes, bytearray)):
+                    标准错误 = 标准错误.decode("utf-8", errors="replace")
+                return {"成功": False, "退出码": -1, "标准输出": str(标准输出), "标准错误": str(标准错误), "错误": "命令执行超时"}
+            except Exception as e:
+                return {"成功": False, "退出码": -1, "标准输出": "", "标准错误": str(e), "错误": str(e)}
         self.全局环境.记住("文件存在", 文件存在)
         self.全局环境.记住("目录存在", 目录存在)
         self.全局环境.记住("创建目录", 创建目录)
         self.全局环境.记住("列出目录", 列出目录)
         self.全局环境.记住("删除文件", 删除文件)
         self.全局环境.记住("删除目录", 删除目录)
+        self.全局环境.记住("复制文件", 复制文件)
+        self.全局环境.记住("移动文件", 移动文件)
+        self.全局环境.记住("重命名", 重命名)
+        self.全局环境.记住("遍历文件", 遍历文件)
+        self.全局环境.记住("复制目录", 复制目录)
+        self.全局环境.记住("压缩目录", 压缩目录)
+        self.全局环境.记住("解压缩", 解压缩)
+        self.全局环境.记住("哈希文本", 哈希文本)
+        self.全局环境.记住("哈希文件", 哈希文件)
+        self.全局环境.记住("下载文件", 下载文件)
+        self.全局环境.记住("匹配文件", 匹配文件)
+        self.全局环境.记住("文件信息", 文件信息)
+        self.全局环境.记住("目录大小", 目录大小)
+        self.全局环境.记住("格式时间", 格式时间)
+        self.全局环境.记住("解析时间", 解析时间)
+        self.全局环境.记住("写日志", 写日志)
+        self.全局环境.记住("读日志", 读日志)
+        self.全局环境.记住("睡眠", 睡眠)
         self.全局环境.记住("拼路径", 拼路径)
         self.全局环境.记住("绝对路径", 绝对路径)
         self.全局环境.记住("当前目录", 当前目录)
+        self.全局环境.记住("读环境变量", 读环境变量)
+        self.全局环境.记住("写环境变量", 写环境变量)
+        self.全局环境.记住("执行命令", 执行命令)
 
         # --- JSON 数据 ---
         def 解析JSON(文本):
@@ -308,10 +726,97 @@ class 解释器:
             with open(str(路径), "w", encoding="utf-8") as f:
                 json.dump(对象, f, ensure_ascii=False, indent=缩进)
             return str(路径)
+        def 读CSV(路径):
+            import csv
+            路径文本 = str(路径)
+            if not os.path.isfile(路径文本):
+                return []
+            with open(路径文本, "r", encoding="utf-8", newline="") as f:
+                字典读取器 = csv.DictReader(f)
+                if 字典读取器.fieldnames:
+                    return [dict(行) for 行 in 字典读取器]
+                f.seek(0)
+                普通读取器 = csv.reader(f)
+                return [list(行) for 行 in 普通读取器]
+        def 写CSV(路径, 行列表, 表头=None):
+            import csv
+            路径文本 = str(路径)
+            父目录 = os.path.dirname(os.path.abspath(路径文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            if isinstance(行列表, (list, tuple)):
+                数据列表 = list(行列表)
+            else:
+                数据列表 = []
+
+            with open(路径文本, "w", encoding="utf-8", newline="") as f:
+                if 数据列表 and isinstance(数据列表[0], dict):
+                    if isinstance(表头, (list, tuple)) and 表头:
+                        列名 = [str(列) for 列 in 表头]
+                    else:
+                        列名 = []
+                        for 行 in 数据列表:
+                            if isinstance(行, dict):
+                                for 键 in 行.keys():
+                                    键名 = str(键)
+                                    if 键名 not in 列名:
+                                        列名.append(键名)
+                    写入器 = csv.DictWriter(f, fieldnames=列名)
+                    if 列名:
+                        写入器.writeheader()
+                    for 行 in 数据列表:
+                        if isinstance(行, dict):
+                            写入器.writerow({列: 行.get(列, "") for 列 in 列名})
+                else:
+                    写入器 = csv.writer(f)
+                    if isinstance(表头, (list, tuple)) and 表头:
+                        写入器.writerow([str(列) for 列 in 表头])
+                    for 行 in 数据列表:
+                        if isinstance(行, (list, tuple)):
+                            写入器.writerow(list(行))
+                        elif isinstance(行, dict):
+                            写入器.writerow(list(行.values()))
+                        else:
+                            写入器.writerow([行])
+            return 路径文本
+        def 读INI(路径):
+            import configparser
+            路径文本 = str(路径)
+            if not os.path.isfile(路径文本):
+                return {}
+            配置 = configparser.ConfigParser()
+            配置.read(路径文本, encoding="utf-8")
+            结果 = {}
+            for 节 in 配置.sections():
+                结果[节] = {}
+                for 键, 值 in 配置.items(节):
+                    结果[节][键] = 值
+            return 结果
+        def 写INI(路径, 数据):
+            import configparser
+            路径文本 = str(路径)
+            父目录 = os.path.dirname(os.path.abspath(路径文本))
+            if 父目录:
+                os.makedirs(父目录, exist_ok=True)
+            配置 = configparser.ConfigParser()
+            if isinstance(数据, dict):
+                for 节, 映射 in 数据.items():
+                    节名 = str(节)
+                    配置[节名] = {}
+                    if isinstance(映射, dict):
+                        for 键, 值 in 映射.items():
+                            配置[节名][str(键)] = str(值)
+            with open(路径文本, "w", encoding="utf-8") as f:
+                配置.write(f)
+            return 路径文本
         self.全局环境.记住("解析JSON", 解析JSON)
         self.全局环境.记住("生成JSON", 生成JSON)
         self.全局环境.记住("读JSON", 读JSON)
         self.全局环境.记住("写JSON", 写JSON)
+        self.全局环境.记住("读CSV", 读CSV)
+        self.全局环境.记住("写CSV", 写CSV)
+        self.全局环境.记住("读INI", 读INI)
+        self.全局环境.记住("写INI", 写INI)
 
         # --- HTTP 请求 ---
         def _整理请求体(数据):
