@@ -65,6 +65,12 @@ class 易码IDE:
         self._autocomplete_replace_end = None
         self._autocomplete_popup_line = None
         self._autocomplete_mouse_down = False
+        self._calltip_flash_after_id = None
+        self.autocomplete_max_items = 16
+        # 补全匹配策略：
+        # - 默认 False：仅前缀匹配（更真实，避免误导）
+        # - 设为 True：允许“包含匹配”作为兜底
+        self.autocomplete_fuzzy_enabled = False
         self._last_edit_tab_id = None
         self._last_edit_index = None
         self._last_edit_word = ""
@@ -132,16 +138,16 @@ class 易码IDE:
         
         # 定义代码片段 (Snippets) 字典
         self.snippets = {
-            "如果": "如果 ‹条件› 就\n    ‹代码›",
-            "不然": "不然\n    ‹代码›",
-            "否则如果": "否则如果 ‹条件› 就\n    ‹代码›",
-            "功能": "功能 ‹名字›(‹参数›)\n    ‹代码›",
-            "当": "当 ‹条件› 的时候\n    ‹代码›",
-            "重复": "重复 ‹次数› 次\n    ‹代码›",
-            "遍历": "遍历 ‹列表› 里的每一个 叫做 ‹元素›\n    ‹代码›",
-            "尝试": "尝试\n    ‹可能出错的代码›\n如果出错\n    ‹处理错误›",
-            "显示": "显示 ‹内容›",
-            "定义图纸": "定义图纸 ‹名字›(‹属性›)\n    它的 ‹属性› = ‹属性›\n\n    功能 ‹方法›()\n        ‹代码›",
+            "如果": "如果 真 就\n    显示 \"在这里写代码\"",
+            "不然": "不然\n    显示 \"在这里写代码\"",
+            "否则如果": "否则如果 真 就\n    显示 \"在这里写代码\"",
+            "功能": "功能 新功能()\n    显示 \"功能已执行\"",
+            "当": "当 真 的时候\n    显示 \"循环中\"",
+            "重复": "重复 3 次\n    显示 \"循环中\"",
+            "遍历": "数据 = 新列表(1, 2, 3)\n遍历 数据 里的每一个 叫做 项\n    显示 项",
+            "尝试": "尝试\n    显示 \"执行中\"\n如果出错\n    显示 \"发生错误\"",
+            "显示": "显示 \"这里是输出\"",
+            "定义图纸": "定义图纸 用户(名字)\n    它的 名字 = 名字\n\n    功能 打招呼()\n        显示 \"你好，\" + 它的 名字",
         }
 
         self.builtin_words = self._builtin_word_catalog()
@@ -3432,7 +3438,12 @@ class 易码IDE:
             return None
 
     def _on_autocomplete_mouse_press(self, event=None):
+        idx = self._autocomplete_index_from_event(event)
+        if idx is None:
+            # 点击分组标题或空白时，不改变当前可插入候选。
+            return "break"
         self._autocomplete_mouse_down = True
+        self._autocomplete_select_index(idx)
         try:
             self.autocomplete_tree.focus_set()
         except tk.TclError:
@@ -3489,7 +3500,164 @@ class 易码IDE:
         except tk.TclError:
             pass
 
-    def _show_calltip(self, editor, 文本):
+    def _标准化补全签名(self, 签名):
+        签名文本 = str(签名 or "").strip()
+        if not 签名文本:
+            return "()"
+        if not (签名文本.startswith("(") and 签名文本.endswith(")")):
+            return "()"
+
+        参数列表 = self._拆分签名参数(签名文本)
+        清洗后 = []
+        标识符模式 = re.compile(r'^[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*$')
+        for 原参数 in 参数列表:
+            参数 = str(原参数 or "").strip()
+            if not 参数:
+                continue
+            if 参数 in {"self", "cls", "/", "*"}:
+                continue
+            if 参数.startswith("**"):
+                参数 = 参数[2:].strip()
+            elif 参数.startswith("*"):
+                参数 = 参数[1:].strip()
+            if ":" in 参数:
+                参数 = 参数.split(":", 1)[0].strip()
+            if "=" in 参数:
+                参数 = 参数.split("=", 1)[0].strip()
+            if not 参数:
+                continue
+            if not 标识符模式.match(参数):
+                # 签名格式不标准时，保底退回空参括号，避免插入噪声
+                return "()"
+            清洗后.append(参数)
+        if not 清洗后:
+            return "()"
+        return "(" + ", ".join(清洗后) + ")"
+
+    def _补全首参数区间偏移(self, 调用片段):
+        文本 = str(调用片段 or "")
+        if not 文本.startswith("("):
+            return None
+        结束 = 文本.find(")")
+        if 结束 <= 1:
+            return None
+        逗号 = 文本.find(",", 1, 结束)
+        参数终点 = 逗号 if 逗号 > 0 else 结束
+        if 参数终点 <= 1:
+            return None
+        return (1, 参数终点)
+
+    def _导出前置检查(self, 源码入口, 打包配置, 输出路径):
+        错误列表 = []
+        警告列表 = []
+
+        入口路径 = os.path.abspath(str(源码入口 or "").strip()) if 源码入口 else ""
+        if not 入口路径 or not os.path.isfile(入口路径):
+            错误列表.append("入口脚本不存在，请先保存并确认主程序路径。")
+
+        if not self.workspace_dir or not os.path.isdir(self.workspace_dir):
+            错误列表.append("当前项目目录无效，请先打开一个有效项目目录。")
+
+        工具根目录 = os.path.dirname(os.path.abspath(__file__))
+        打包工具路径 = os.path.join(工具根目录, "易码打包工具.py")
+        核心库目录 = os.path.join(工具根目录, "yima")
+        if not os.path.isfile(打包工具路径):
+            错误列表.append("缺少打包工具文件：易码打包工具.py")
+        if not os.path.isdir(核心库目录):
+            错误列表.append("缺少运行时核心目录：yima")
+
+        输出绝对路径 = os.path.abspath(os.path.expanduser(str(输出路径 or "").strip()))
+        输出目录 = os.path.dirname(输出绝对路径) or self.workspace_dir
+        if not 输出绝对路径.lower().endswith(".exe"):
+            错误列表.append("输出路径必须以 .exe 结尾。")
+        try:
+            os.makedirs(输出目录, exist_ok=True)
+        except Exception as e:
+            错误列表.append(f"无法创建输出目录：{输出目录}（{e}）")
+
+        if os.path.isdir(输出目录):
+            测试文件 = os.path.join(输出目录, f".yima_export_probe_{int(time.time() * 1000)}.tmp")
+            try:
+                with open(测试文件, "w", encoding="utf-8") as f:
+                    f.write("ok")
+                os.remove(测试文件)
+            except Exception as e:
+                错误列表.append(f"输出目录不可写：{输出目录}（{e}）")
+
+        图标路径 = str((打包配置 or {}).get("图标路径") or "").strip()
+        if 图标路径:
+            图标绝对 = os.path.abspath(os.path.expanduser(图标路径))
+            if not os.path.isfile(图标绝对):
+                错误列表.append(f"图标文件不存在：{图标绝对}")
+            elif not 图标绝对.lower().endswith(".ico"):
+                警告列表.append("图标建议使用 .ico 格式，其他格式在部分系统上可能不稳定。")
+
+        软件名称 = str((打包配置 or {}).get("软件名称") or "").strip()
+        if not 软件名称:
+            错误列表.append("软件名称不能为空。")
+        elif 软件名称 != self._sanitize_export_name(软件名称):
+            警告列表.append("软件名称包含非法字符，实际文件名会被自动清理。")
+
+        # 扫描入口文件中的引入依赖，尽早提示“模块找不到”
+        try:
+            if 入口路径 and os.path.isfile(入口路径):
+                with open(入口路径, "r", encoding="utf-8") as f:
+                    入口源码 = f.read()
+                引入别名 = self._提取引入别名映射(入口源码)
+                内置模块集合 = set(self._builtin_module_exports().keys())
+                缺失模块 = []
+                for 模块名 in sorted(set(引入别名.values())):
+                    名称 = str(模块名 or "").strip()
+                    if not 名称 or 名称 in 内置模块集合:
+                        continue
+                    本地模块路径 = self._语义定位易码模块(名称)
+                    if 本地模块路径:
+                        continue
+                    try:
+                        if importlib.util.find_spec(名称) is not None:
+                            continue
+                    except Exception:
+                        pass
+                    缺失模块.append(名称)
+                if 缺失模块:
+                    错误列表.append("入口引入中存在无法解析的模块：" + "、".join(缺失模块))
+        except Exception as e:
+            警告列表.append(f"未完成依赖预扫描：{e}")
+
+        return 错误列表, 警告列表
+
+    def _flash_calltip(self):
+        try:
+            if self._calltip_flash_after_id:
+                try:
+                    self.root.after_cancel(self._calltip_flash_after_id)
+                except tk.TclError:
+                    pass
+                self._calltip_flash_after_id = None
+            self.calltip_popup.configure(
+                bg="#16304A",
+                highlightbackground="#6CB2FF",
+                highlightcolor="#6CB2FF",
+            )
+            self.calltip_label.configure(bg="#16304A", fg="#FFFFFF")
+
+            def _恢复():
+                try:
+                    self.calltip_popup.configure(
+                        bg="#0F1B2B",
+                        highlightbackground="#2B4664",
+                        highlightcolor="#2B4664",
+                    )
+                    self.calltip_label.configure(bg="#0F1B2B", fg="#DCEBFF")
+                except tk.TclError:
+                    pass
+                self._calltip_flash_after_id = None
+
+            self._calltip_flash_after_id = self.root.after(260, _恢复)
+        except tk.TclError:
+            self._calltip_flash_after_id = None
+
+    def _show_calltip(self, editor, 文本, emphasize=False):
         if not editor:
             self._hide_calltip()
             return
@@ -3507,11 +3675,14 @@ class 易码IDE:
             self.calltip_label.configure(text=内容文本)
             self.root.update_idletasks()
             字体对象 = tkfont.Font(font=self.calltip_label.cget("font"))
-            文字宽度 = max(220, 字体对象.measure(内容文本) + 18)
+            文本行列表 = [行 for 行 in 内容文本.splitlines() if 行] or [内容文本]
+            最大行宽 = max((字体对象.measure(行) for 行 in 文本行列表), default=200)
+            文字宽度 = max(220, 最大行宽 + 20)
             根宽度 = max(420, int(self.root.winfo_width()))
             最大宽度 = max(260, 根宽度 - 16)
             提示宽度 = min(文字宽度, 最大宽度)
-            提示高度 = max(30, 字体对象.metrics("linespace") + 14)
+            行高 = max(16, 字体对象.metrics("linespace"))
+            提示高度 = max(30, 行高 * len(文本行列表) + 14)
 
             x, y, _, 行高 = bbox
             root_x = editor.winfo_rootx() - self.root.winfo_rootx() + x + 4
@@ -3523,6 +3694,8 @@ class 易码IDE:
 
             self.calltip_popup.place(x=root_x, y=root_y, width=提示宽度, height=提示高度)
             self.calltip_popup.lift()
+            if emphasize:
+                self._flash_calltip()
         except Exception:
             self._hide_calltip()
 
@@ -3596,17 +3769,21 @@ class 易码IDE:
     def _高亮当前参数签名(self, 签名, 参数序号):
         签名文本 = str(签名 or "").strip()
         if not 签名文本:
-            return "()"
+            return "()", 0, 0, ""
         参数列表 = self._拆分签名参数(签名文本)
         if not 参数列表:
-            return 签名文本
+            return 签名文本, 0, 0, ""
         try:
             idx = max(0, int(参数序号) - 1)
         except Exception:
             idx = 0
-        if idx < len(参数列表):
-            参数列表[idx] = f"【{参数列表[idx]}】"
-        return "(" + ", ".join(参数列表) + ")"
+        if idx >= len(参数列表):
+            idx = len(参数列表) - 1
+
+        当前参数名 = str(参数列表[idx] or "").strip()
+        # 使用更醒目的 ASCII 包裹，减少字体兼容差异导致的视觉不明显
+        参数列表[idx] = f"<<{参数列表[idx]}>>"
+        return "(" + ", ".join(参数列表) + ")", idx + 1, len(参数列表), 当前参数名
 
     def _解析当前调用上下文(self, 行前文本):
         文本 = str(行前文本 or "")
@@ -3731,7 +3908,7 @@ class 易码IDE:
 
         return ""
 
-    def _update_calltip(self, editor=None, tab_id=None, 全文=None, 行前文本=None, 上下文=None):
+    def _update_calltip(self, editor=None, tab_id=None, 全文=None, 行前文本=None, 上下文=None, emphasize=False):
         编辑器 = editor if editor else self._get_current_editor()
         if not 编辑器:
             self._hide_calltip()
@@ -3761,20 +3938,99 @@ class 易码IDE:
             self._hide_calltip()
             return
 
-        高亮签名 = self._高亮当前参数签名(签名, 调用上下文["参数序号"])
-        提示文本 = f"{调用上下文['调用名']}{高亮签名}    参数 {调用上下文['参数序号']}"
-        self._show_calltip(编辑器, 提示文本)
+        高亮签名, 参数位次, 参数总数, 当前参数名 = self._高亮当前参数签名(签名, 调用上下文["参数序号"])
+        if 参数总数 > 0:
+            参数说明 = f"当前参数：第 {参数位次}/{参数总数} 个"
+            if 当前参数名:
+                参数说明 += f"（{当前参数名}）"
+        else:
+            参数说明 = f"当前参数：第 {调用上下文['参数序号']} 个"
+        提示文本 = f"参数提示：{调用上下文['调用名']}{高亮签名}\n{参数说明}"
+        self._show_calltip(编辑器, 提示文本, emphasize=bool(emphasize))
 
     def _autocomplete_match(self, 候选词, 前缀):
         if not 候选词:
             return False
         if not 前缀:
             return True
-        if 候选词 == 前缀:
+        词 = str(候选词 or "")
+        前 = str(前缀 or "")
+        if 词 == 前:
             return True
-        if 候选词.startswith(前缀):
+        if 词.startswith(前):
             return True
-        return len(前缀) >= 2 and (前缀 in 候选词)
+        # 默认关闭模糊包含匹配，避免“看起来能用、实际不该推荐”的噪声候选。
+        if self.autocomplete_fuzzy_enabled and len(前) >= 2:
+            return 前 in 词
+        return False
+
+    def _autocomplete_source_priority(self, 来源):
+        """
+        统一候选排序优先级（越小越优先）：
+        1) 当前文件定义（功能/图纸/变量/别名）
+        2) 已引入成员（含 点号成员/已引入平铺成员）
+        3) 内置能力
+        4) 关键字
+        5) 模板
+        """
+        来源值 = str(来源 or "").strip()
+        优先级 = {
+            "function": 0,
+            "blueprint": 0,
+            "variable": 0,
+            "alias": 0,
+            "module": 0,
+
+            "member": 1,
+            "member_func": 1,
+            "member_blueprint": 1,
+            "member_class": 1,
+            "member_var": 1,
+            "member_alias": 1,
+            "imported": 1,
+            "imported_func": 1,
+            "imported_blueprint": 1,
+            "imported_class": 1,
+            "imported_var": 1,
+            "imported_alias": 1,
+
+            "builtin": 2,
+            "builtin_func": 2,
+
+            "keyword": 3,
+            "snippet": 4,
+        }
+        return 优先级.get(来源值, 9)
+
+    def _autocomplete_source_group(self, 来源):
+        来源值 = str(来源 or "").strip()
+        if 来源值 in {"function", "blueprint", "variable", "alias", "module"}:
+            return "current", "当前文件"
+        if 来源值 in {
+            "member", "member_func", "member_blueprint", "member_class", "member_var", "member_alias",
+            "imported", "imported_func", "imported_blueprint", "imported_class", "imported_var", "imported_alias",
+        }:
+            return "imported", "已引入"
+        if 来源值 in {"builtin", "builtin_func"}:
+            return "builtin", "内置能力"
+        if 来源值 == "keyword":
+            return "keyword", "关键字"
+        if 来源值 == "snippet":
+            return "snippet", "模板"
+        return "other", "其他"
+
+    def _sort_autocomplete_candidates(self, 候选列表):
+        def 排序键(候选):
+            词 = str((候选 or {}).get("insert", "") or "")
+            来源 = str((候选 or {}).get("source", "") or "")
+            分数 = float((候选 or {}).get("score", 0.0) or 0.0)
+            return (
+                self._autocomplete_source_priority(来源),
+                分数,
+                len(词),
+                词,
+            )
+        return sorted(list(候选列表 or []), key=排序键)
 
     def _格式化参数签名(self, 参数列表):
         参数 = [str(p).strip() for p in (参数列表 or []) if str(p).strip()]
@@ -4270,8 +4526,17 @@ class 易码IDE:
             "variable": "#7BD88F",
             "local_word": "#9AA6B2",
         }
+        分组标题颜色 = "#8FA1B8"
+        分组标题字体 = ("Microsoft YaHei", 9, "bold")
+        try:
+            self.autocomplete_tree.tag_configure("group_header", foreground=分组标题颜色, font=分组标题字体)
+        except tk.TclError:
+            pass
 
-        for 行号, 候选 in enumerate(排序候选[:28]):
+        最大候选数 = max(8, int(getattr(self, "autocomplete_max_items", 16) or 16))
+        当前分组键 = None
+        分组序号 = 0
+        for 行号, 候选 in enumerate(排序候选[:最大候选数]):
             if isinstance(候选, dict):
                 来源 = str(候选.get("source", "")).strip()
                 词 = str(候选.get("insert", "")).strip()
@@ -4284,6 +4549,15 @@ class 易码IDE:
                 可调用 = bool(候选[4]) if len(候选) > 4 else False
             if not 词:
                 continue
+            分组键, 分组标题 = self._autocomplete_source_group(来源)
+            if 分组键 != 当前分组键:
+                当前分组键 = 分组键
+                分组序号 += 1
+                try:
+                    分组id = f"ac_group_{分组键}_{分组序号}"
+                    self.autocomplete_tree.insert("", "end", iid=分组id, values=(f"【{分组标题}】", ""), tags=("group_header",))
+                except tk.TclError:
+                    pass
             标签 = 标签映射.get(来源, "上下文")
             显示内容 = f"{词}{签名}" if 签名 else 词
             self._autocomplete_items.append({
@@ -4336,7 +4610,11 @@ class 易码IDE:
                 root_x = max(8, 根宽度 - 列表宽度 - 8)
 
             行高 = max(20, 字体对象.metrics("linespace") + 6)
-            可见行数 = min(max(4, len(self._autocomplete_items)), 10)
+            try:
+                总可见项 = len(self.autocomplete_tree.get_children())
+            except tk.TclError:
+                总可见项 = len(self._autocomplete_items)
+            可见行数 = min(max(4, 总可见项), 12)
             标题高度 = 26
             水平滚动条高度 = max(12, int(16 * self.dpi_scale))
             列表高度 = max(140, 标题高度 + 行高 * 可见行数 + 水平滚动条高度 + 8)
@@ -4478,7 +4756,7 @@ class 易码IDE:
 
             self._autocomplete_replace_start = "insert" if not 成员前缀 else f"insert - {len(成员前缀)}c"
             self._autocomplete_replace_end = "insert"
-            self._展示自动补全候选(editor, sorted(排名列表, key=lambda x: (x["score"], x["insert"])))
+            self._展示自动补全候选(editor, self._sort_autocomplete_candidates(排名列表))
             return
 
         普通匹配 = re.search(rf'({标识符模式})$', 行前文本)
@@ -4560,9 +4838,7 @@ class 易码IDE:
             来源 = 导入类型到来源.get(词类型, "imported")
             可调用 = 词类型 in {"function", "class"}
             加候选(词, 来源, 0.46, 签名=导入签名.get(词, ""), 可调用=可调用)
-        for 词 in 上下文["局部词"]:
-            if 词 not in self.autocomplete_words:
-                加候选(词, "local_word", 0.7, 可调用=False)
+        # 关闭“上下文自由词”补全：避免把注释/随手文本当成候选，确保补全结果更真实可用。
 
         if not 候选映射:
             self._hide_autocomplete()
@@ -4570,7 +4846,7 @@ class 易码IDE:
 
         self._autocomplete_replace_start = f"insert - {len(当前词)}c"
         self._autocomplete_replace_end = "insert"
-        排序后 = sorted(候选映射.values(), key=lambda x: (x["score"], x["insert"]))
+        排序后 = self._sort_autocomplete_candidates(候选映射.values())
         self._展示自动补全候选(editor, 排序后)
 
     def _handle_autocomplete_nav(self, event):
@@ -4611,6 +4887,7 @@ class 易码IDE:
         当前候选 = self._autocomplete_items[idx]
         selected_word = str(当前候选.get("insert", "")).strip()
         selected_source = str(当前候选.get("source", "")).strip()
+        selected_sig = str(当前候选.get("sig", "") or "").strip()
         selected_callable = bool(当前候选.get("callable", False))
         if not selected_word:
             self._hide_autocomplete()
@@ -4658,18 +4935,35 @@ class 易码IDE:
             末尾位置 = editor.index(f"{start_pos} + {len(selected_word)}c")
 
             自动补括号来源 = {"function", "member", "member_func", "imported", "imported_func", "builtin_func", "member_class", "imported_class"}
+            需要参数提示强调 = False
             if selected_callable or (selected_source in 自动补括号来源):
-                下一个字符 = editor.get(末尾位置, f"{末尾位置}+1c")
-                if 下一个字符 != "(":
-                    editor.insert(末尾位置, "()")
-                    editor.mark_set("insert", f"{末尾位置}+1c")
+                前瞻文本 = editor.get(末尾位置, f"{末尾位置}+6c")
+                if not re.match(r'^\s*[\(（]', 前瞻文本 or ""):
+                    调用片段 = self._标准化补全签名(selected_sig)
+                    editor.insert(末尾位置, 调用片段)
+                    占位偏移 = self._补全首参数区间偏移(调用片段)
+                    if 占位偏移:
+                        起偏移, 止偏移 = 占位偏移
+                        sel_start = editor.index(f"{末尾位置}+{起偏移}c")
+                        sel_end = editor.index(f"{末尾位置}+{止偏移}c")
+                        editor.tag_remove("sel", "1.0", "end")
+                        editor.tag_add("sel", sel_start, sel_end)
+                        editor.mark_set("insert", sel_end)
+                    else:
+                        editor.mark_set("insert", f"{末尾位置}+1c")
                 else:
-                    editor.mark_set("insert", f"{末尾位置}+1c")
+                    # 已手动输入括号时，光标跳到括号内
+                    括号匹配 = re.search(r'[\(（]', 前瞻文本 or "")
+                    偏移 = (括号匹配.start() + 1) if 括号匹配 else 1
+                    editor.mark_set("insert", f"{末尾位置}+{偏移}c")
+                需要参数提示强调 = True
             else:
                 editor.mark_set("insert", 末尾位置)
 
             editor.focus_set()
             self.highlight()
+            if 需要参数提示强调:
+                self._update_calltip(editor=editor, tab_id=self._get_current_tab_id(), emphasize=True)
         except tk.TclError:
             pass
 
@@ -6226,6 +6520,15 @@ class 易码IDE:
                 return
             self._switch_project(dir_path, preferred_file=os.path.join(dir_path, "主程序.ym"), create_blank_if_empty=True)
 
+    def _sanitize_export_name(self, 名称):
+        结果 = str(名称 or "").strip()
+        if not 结果:
+            结果 = "易码生成软件"
+        for 坏字符 in '<>:"/\\|?*':
+            结果 = 结果.replace(坏字符, "_")
+        结果 = 结果.strip(" .")
+        return 结果 if 结果 else "易码生成软件"
+
     def export_exe(self):
         editor = self._get_current_editor()
         tab_id = self._get_current_tab_id()
@@ -6257,17 +6560,8 @@ class 易码IDE:
             源码入口 = None
             软件名称原始 = "易码生成软件"
 
-        def 清理软件名(名称):
-            结果 = str(名称 or "").strip()
-            if not 结果:
-                结果 = "易码生成软件"
-            for 坏字符 in '<>:"/\\|?*':
-                结果 = 结果.replace(坏字符, "_")
-            结果 = 结果.strip(" .")
-            return 结果 if 结果 else "易码生成软件"
-
         默认图标 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.ico")
-        默认软件名 = 清理软件名(软件名称原始)
+        默认软件名 = self._sanitize_export_name(软件名称原始)
         默认输出目录 = os.path.join(self.workspace_dir, "易码_成品软件")
         默认输出路径 = os.path.join(默认输出目录, f"{默认软件名}.exe")
         默认图标路径 = 默认图标 if os.path.isfile(默认图标) else ""
@@ -6441,7 +6735,7 @@ class 易码IDE:
             def 选择输出路径():
                 当前路径值 = 路径变量.get().strip()
                 初始目录 = self.workspace_dir
-                初始文件 = f"{清理软件名(名称变量.get())}.exe"
+                初始文件 = f"{self._sanitize_export_name(名称变量.get())}.exe"
                 if 当前路径值:
                     当前路径值 = os.path.abspath(os.path.expanduser(当前路径值))
                     if os.path.isdir(os.path.dirname(当前路径值)):
@@ -6478,7 +6772,7 @@ class 易码IDE:
                 高级窗口.destroy()
 
             def 确认高级():
-                软件名 = 清理软件名(名称变量.get())
+                软件名 = self._sanitize_export_name(名称变量.get())
                 输出路径 = str(路径变量.get() or "").strip()
                 if not 输出路径:
                     输出路径 = os.path.join(默认输出目录, f"{软件名}.exe")
@@ -6539,6 +6833,15 @@ class 易码IDE:
             return
 
         输出路径 = os.path.abspath(os.path.expanduser(打包配置["输出路径"]))
+        错误列表, 警告列表 = self._导出前置检查(源码入口, 打包配置, 输出路径)
+        if 错误列表:
+            错误文本 = "\n".join(f"{i}. {msg}" for i, msg in enumerate(错误列表, 1))
+            messagebox.showerror("无法开始打包", f"导出前检查未通过：\n\n{错误文本}", parent=self.root)
+            return
+        if 警告列表:
+            警告文本 = "\n".join(f"{i}. {msg}" for i, msg in enumerate(警告列表, 1))
+            if not messagebox.askyesno("导出前提醒", f"发现以下风险：\n\n{警告文本}\n\n是否继续打包？", parent=self.root):
+                return
         if os.path.exists(输出路径):
             if not messagebox.askyesno("确认覆盖", f"目标文件已存在：\n{输出路径}\n\n是否覆盖？", parent=self.root):
                 return
