@@ -16,6 +16,8 @@ err.txt
 output.log
 output2.log
 output3.log
+打包缓存文件夹/
+_启动器_*.spec
 
 # OS/editor
 .DS_Store

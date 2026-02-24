@@ -34,11 +34,20 @@ PY = sys.executable
 SYS_ENCODING = locale.getpreferredencoding(False) or "utf-8"
 
 
-def run_cmd(args: list[str], *, env: dict[str, str] | None = None) -> str:
+def run_cmd(
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> str:
+    merged_env = dict(os.environ)
+    merged_env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+    if env:
+        merged_env.update(env)
     proc = subprocess.run(
         args,
-        cwd=ROOT,
-        env=env,
+        cwd=cwd or ROOT,
+        env=merged_env,
         capture_output=True,
         text=True,
         encoding=SYS_ENCODING,
@@ -69,7 +78,8 @@ def compile_check() -> None:
         "yima/错误.py",
         "yima/信号.py",
     ]
-    run_cmd([PY, "-m", "py_compile", *files])
+    with tempfile.TemporaryDirectory(prefix="yima_pycache_", dir=ROOT) as td:
+        run_cmd([PY, "-m", "py_compile", *files], env={"PYTHONPYCACHEPREFIX": td})
     print("[OK] 编译检查通过")
 
 
@@ -79,11 +89,17 @@ def sample_check() -> None:
         "示例/M11模块化测试.ym",
         "示例/M12容错测试.ym",
         "示例/经典案例_图纸对象入门.ym",
-        "示例/经典案例_注册登录_自动测试.ym",
     ]
     for sample in samples:
         run_cmd([PY, "易码.py", sample])
         print(f"[OK] 示例通过: {sample}")
+
+    # 该用例会基于“当前工作目录”创建数据库文件，放到临时目录执行以避免污染仓库。
+    auth_sample = ROOT / "示例/经典案例_注册登录_自动测试.ym"
+    cli_entry = ROOT / "易码.py"
+    with tempfile.TemporaryDirectory(prefix="yima_reg_auth_", dir=ROOT) as td:
+        run_cmd([PY, str(cli_entry), str(auth_sample)], cwd=Path(td))
+    print("[OK] 示例通过: 示例/经典案例_注册登录_自动测试.ym（隔离目录）")
 
 
 def semantic_check() -> None:
@@ -169,6 +185,12 @@ def editor_logic_regression_check() -> None:
     print("[OK] 编辑器逻辑回归通过")
 
 
+def packaging_regression_check() -> None:
+    out = run_cmd([PY, "scripts/run_packaging_regression.py"])
+    assert_contains(out, "打包专项回归完成：全部通过", "打包专项回归")
+    print("[OK] 打包专项回归通过")
+
+
 def main() -> int:
     print("=== 易码回归开始 ===")
     compile_check()
@@ -176,6 +198,7 @@ def main() -> int:
     semantic_check()
     error_regression_check()
     editor_logic_regression_check()
+    packaging_regression_check()
     print("=== 易码回归完成：全部通过 ===")
     return 0
 

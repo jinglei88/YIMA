@@ -55,15 +55,11 @@ def _提取引入模块名(源码文本):
     """
     从易码源码中提取模块引用：
       - 引入 "模块名" 叫做 别名
-      - 用 "模块名" 中的 功能名
     """
     结果 = []
     已收录 = set()
     引入模式 = re.compile(
         r'^\s*引入\s*["“]([^"”]+)["”](?:\s*叫做\s*[A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*)?\s*$'
-    )
-    精确引入模式 = re.compile(
-        r'^\s*用\s*["“]([^"”]+)["”]\s*中的\s*[A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*\s*$'
     )
     for 原始行 in str(源码文本 or "").splitlines():
         行文本 = str(原始行).lstrip("\ufeff")
@@ -74,10 +70,6 @@ def _提取引入模块名(源码文本):
         匹配 = 引入模式.match(去注释)
         if 匹配:
             模块名 = 匹配.group(1).strip()
-        else:
-            匹配 = 精确引入模式.match(去注释)
-            if 匹配:
-                模块名 = 匹配.group(1).strip()
         if 模块名 and 模块名 not in 已收录:
             结果.append(模块名)
             已收录.add(模块名)
@@ -139,16 +131,6 @@ def _推断可打包Python模块(模块名):
         except Exception:
             pass
     return 结果
-
-def _收集项目源码文件(项目根目录):
-    结果 = []
-    if not 项目根目录 or not os.path.isdir(项目根目录):
-        return 结果
-    for 根目录, _, 文件名列表 in os.walk(项目根目录):
-        for 文件名 in 文件名列表:
-            if 文件名.lower().endswith(".ym"):
-                结果.append(os.path.abspath(os.path.join(根目录, 文件名)))
-    return sorted(set(结果))
 
 def _构建易码依赖图(入口源码路径, 项目根目录):
     """
@@ -349,10 +331,7 @@ def 编译并打包(
     进度打字机=print,
     软件名称=None,
     源码目录=None,
-    进度打印=None,  # 兼容旧参数名
 ):
-    if 进度打印 is not None:
-        进度打字机 = 进度打印
     if 进度打字机 is None:
         进度打字机 = print
     if not os.path.exists(源码路径):

@@ -28,6 +28,31 @@ from yima.词法分析 import 词法分析器
 from yima.语法分析 import 语法分析器
 
 
+from yima.editor_logic_core import (
+    build_advanced_export_config,
+    build_export_confirmation_text,
+    build_export_defaults,
+    build_quick_export_config,
+    collect_autocomplete_context,
+    collect_context_snippet_hints,
+    export_preflight_check,
+    extract_call_context,
+    first_argument_span_offset,
+    extract_member_completion_target,
+    extract_word_completion_prefix,
+    format_numbered_messages,
+    highlight_current_signature_param,
+    member_completion_seed,
+    merge_member_completion_fallback,
+    normalize_export_output_path,
+    normalize_completion_signature,
+    rank_member_completion_candidates,
+    rank_word_completion_candidates,
+    resolve_call_expression_signature,
+    split_signature_params,
+)
+
+
 def _assert_true(cond: bool, msg: str) -> None:
     if not cond:
         raise AssertionError(msg)
@@ -48,15 +73,12 @@ def _new_harness(workspace: Path):
 
     # 自动补全 / 导出预检
     h._builtin_module_exports = MethodType(易码IDE._builtin_module_exports, h)
-    h._提取引入别名映射 = MethodType(易码IDE._提取引入别名映射, h)
     h._autocomplete_match = MethodType(易码IDE._autocomplete_match, h)
     h._autocomplete_source_priority = MethodType(易码IDE._autocomplete_source_priority, h)
     h._sanitize_export_name = MethodType(易码IDE._sanitize_export_name, h)
     h._导出前置检查 = MethodType(易码IDE._导出前置检查, h)
     h._缩略问题消息 = MethodType(易码IDE._缩略问题消息, h)
     h._格式化问题列表项 = MethodType(易码IDE._格式化问题列表项, h)
-    h._目录在工作区内 = MethodType(易码IDE._目录在工作区内, h)
-    h._就近主程序入口 = MethodType(易码IDE._就近主程序入口, h)
     h._解析导出入口 = MethodType(易码IDE._解析导出入口, h)
 
     # 语义分析
@@ -64,7 +86,6 @@ def _new_harness(workspace: Path):
     h._收集块声明 = MethodType(易码IDE._收集块声明, h)
     h._语义模块搜索路径 = MethodType(易码IDE._语义模块搜索路径, h)
     h._语义定位易码模块 = MethodType(易码IDE._语义定位易码模块, h)
-    h._语义正则兜底导出 = MethodType(易码IDE._语义正则兜底导出, h)
     h._语义读取模块导出 = MethodType(易码IDE._语义读取模块导出, h)
     h._语义读取模块导出详情 = MethodType(易码IDE._语义读取模块导出详情, h)
     h._语义读取模块导出签名 = MethodType(易码IDE._语义读取模块导出签名, h)
@@ -128,6 +149,47 @@ def check_export_preflight() -> None:
         print("[OK] 导出前置检查规则通过")
 
 
+def check_core_export_preflight_rules() -> None:
+    with tempfile.TemporaryDirectory(prefix="yima_core_export_preflight_") as td:
+        root = Path(td)
+        workspace = root / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+
+        tool_root = root / "tool_root"
+        tool_root.mkdir(parents=True, exist_ok=True)
+        (tool_root / "易码打包工具.py").write_text("# tool\n", encoding="utf-8")
+        (tool_root / "yima").mkdir(parents=True, exist_ok=True)
+
+        entry = workspace / "主程序.ym"
+        entry.write_text('引入 "missing_mod" 叫做 缺失\n引入 "json" 叫做 J\n', encoding="utf-8")
+        icon_png = workspace / "app.png"
+        icon_png.write_text("png", encoding="utf-8")
+
+        config = {
+            "软件名称": "坏:名",
+            "图标路径": str(icon_png),
+        }
+        output = str(workspace / "dist" / "坏名.bin")
+
+        errors, warnings = export_preflight_check(
+            source_entry=str(entry),
+            package_config=config,
+            output_path=output,
+            workspace_dir=str(workspace),
+            tool_root_dir=str(tool_root),
+            sanitize_export_name_func=lambda name: str(name).replace(":", "_"),
+            builtin_module_names={"系统工具"},
+            module_locator=lambda _name: None,
+            python_module_exists=lambda name: str(name) == "json",
+        )
+
+        _assert_true(any("输出路径必须以 .exe 结尾。" in str(x) for x in errors), f"core export preflight: output suffix check failed: {errors}")
+        _assert_true(any("missing_mod" in str(x) and "无法解析的模块" in str(x) for x in errors), f"core export preflight: missing module check failed: {errors}")
+        _assert_true(any("软件名称包含非法字符" in str(x) for x in warnings), f"core export preflight: sanitize warning missing: {warnings}")
+        _assert_true(any("图标建议使用 .ico 格式" in str(x) for x in warnings), f"core export preflight: icon warning missing: {warnings}")
+    print("[OK] core export preflight rules passed")
+
+
 def check_semantic_scope_rules() -> None:
     h = _new_harness(ROOT)
 
@@ -187,13 +249,496 @@ def check_export_entry_not_hijacked_by_workspace_root() -> None:
     print("[OK] 导出入口防劫持规则通过")
 
 
+def check_export_config_helper_rules() -> None:
+    with tempfile.TemporaryDirectory(prefix="yima_export_cfg_") as td:
+        root = Path(td)
+        workspace = root / "workspace"
+        source = workspace / "demo"
+        tool_root = root / "tool"
+        output_probe = root / "out"
+        custom_dir = root / "custom"
+        workspace.mkdir(parents=True, exist_ok=True)
+        source.mkdir(parents=True, exist_ok=True)
+        tool_root.mkdir(parents=True, exist_ok=True)
+        output_probe.mkdir(parents=True, exist_ok=True)
+        custom_dir.mkdir(parents=True, exist_ok=True)
+
+        logo = tool_root / "logo.ico"
+        logo.write_text("ico", encoding="utf-8")
+
+        defaults = build_export_defaults(str(workspace), str(source), " A:B?* ", str(tool_root))
+        _assert_true(defaults["软件名称"] == "A_B__", f"export defaults name mismatch: {defaults}")
+        _assert_true(Path(defaults["输出目录"]).resolve() == (source / "易码_成品软件").resolve(), f"export defaults output dir mismatch: {defaults}")
+        _assert_true(Path(defaults["输出路径"]).resolve() == (source / "易码_成品软件" / "A_B__.exe").resolve(), f"export defaults output path mismatch: {defaults}")
+        _assert_true(Path(defaults["图标路径"]).resolve() == logo.resolve(), f"export defaults icon mismatch: {defaults}")
+        _assert_true(defaults["默认软件文件名"] == "A_B__.exe", f"export defaults file name mismatch: {defaults}")
+
+        quick = build_quick_export_config(defaults["软件名称"], defaults["输出路径"], defaults["图标路径"])
+        _assert_true(quick["隐藏黑框"] is True and quick["模式标题"] == "一键打包", f"quick export config mismatch: {quick}")
+
+        normalized_empty = normalize_export_output_path("", "新软件", str(output_probe), "A_B__.exe")
+        _assert_true(Path(normalized_empty).resolve() == (output_probe / "新软件.exe").resolve(), f"export path normalize empty mismatch: {normalized_empty}")
+
+        normalized_dir = normalize_export_output_path(str(custom_dir), "新软件", str(output_probe), "A_B__.exe")
+        _assert_true(Path(normalized_dir).resolve() == (custom_dir / "新软件.exe").resolve(), f"export path normalize dir mismatch: {normalized_dir}")
+
+        normalized_ext = normalize_export_output_path(str(custom_dir / "custom"), "新软件", str(output_probe), "A_B__.exe")
+        _assert_true(Path(normalized_ext).resolve() == (custom_dir / "custom.exe").resolve(), f"export path normalize extension mismatch: {normalized_ext}")
+
+        normalized_default_rename = normalize_export_output_path(str(custom_dir / "A_B__.exe"), "重命名", str(output_probe), "A_B__.exe")
+        _assert_true(
+            Path(normalized_default_rename).resolve() == (custom_dir / "重命名.exe").resolve(),
+            f"export path normalize default-name follow mismatch: {normalized_default_rename}",
+        )
+
+        advanced = build_advanced_export_config(
+            "重命名",
+            str(custom_dir / "A_B__.exe"),
+            str(logo),
+            "console",
+            str(output_probe),
+            "A_B__.exe",
+        )
+        _assert_true(advanced["软件名称"] == "重命名", f"advanced export name mismatch: {advanced}")
+        _assert_true(Path(advanced["输出路径"]).resolve() == (custom_dir / "重命名.exe").resolve(), f"advanced export output mismatch: {advanced}")
+        _assert_true(Path(advanced["图标路径"]).resolve() == logo.resolve(), f"advanced export icon mismatch: {advanced}")
+        _assert_true(advanced["隐藏黑框"] is False and advanced["模式标题"] == "高级导出", f"advanced export mode mismatch: {advanced}")
+
+        numbered = format_numbered_messages(["A", "B"])
+        _assert_true(numbered == "1. A\n2. B", f"numbered messages mismatch: {numbered}")
+
+        confirm_text = build_export_confirmation_text(quick, str(source / "主程序.ym"), quick["输出路径"])
+        _assert_true("模式：一键打包" in confirm_text and "入口：主程序.ym" in confirm_text, f"export confirm text mismatch: {confirm_text}")
+    print("[OK] export config helper rules passed")
+
+
+
+def check_core_autocomplete_context_rules() -> None:
+    kw_import = "\u5f15\u5165"
+    kw_alias = "\u53eb\u505a"
+    kw_blueprint = "\u5b9a\u4e49\u56fe\u7eb8"
+    kw_func = "\u529f\u80fd"
+    kw_return = "\u8fd4\u56de"
+    kw_show = "\u663e\u793a"
+    kw_self = "\u5b83\u7684"
+    kw_create = "\u9020\u4e00\u4e2a"
+
+    alias_math = "\u6570\u5b66"
+    obj_main = "\u4e3b\u89d2"
+    bp_player = "\u73a9\u5bb6"
+    name_field = "\u540d\u5b57"
+    ask_func = "\u95ee\u5019"
+    sum_func = "\u6c42\u548c"
+    temp_var = "\u4e34\u65f6"
+
+    code = (
+        f'{kw_import} "math" {kw_alias} {alias_math}\n'
+        f"{kw_blueprint} {bp_player}({name_field})\n"
+        f"    {kw_self} {name_field} = {name_field}\n"
+        f"    {kw_func} {ask_func}()\n"
+        f"        {kw_return} {name_field}\n"
+        f'{obj_main} = {kw_create} {bp_player}("A")\n'
+        f"{kw_func} {sum_func}(a, b)\n"
+        f"    {temp_var} = a + b\n"
+        f"    {kw_return} {temp_var}\n"
+        f"{kw_show} {obj_main}.{ask_func}\n"
+    )
+
+    def fmt(params):
+        values = [str(p).strip() for p in (params or []) if str(p).strip()]
+        return f"({', '.join(values)})" if values else "()"
+
+    def details(module_name, _tab_id):
+        if str(module_name) == "math":
+            return {"sqrt": "function", "pi": "variable"}
+        return {}
+
+    def signatures(module_name, _tab_id):
+        if str(module_name) == "math":
+            return {"sqrt": "(x)"}
+        return {}
+
+    def members(_module_name, _tab_id):
+        return set()
+
+    context = collect_autocomplete_context(
+        code,
+        fmt,
+        module_member_details_resolver=details,
+        module_member_signatures_resolver=signatures,
+        module_members_resolver=members,
+        tab_id=None,
+        cursor_line=9,
+    )
+
+    key_import_alias = "\u5f15\u5165\u522b\u540d"
+    key_imported_flat = "\u5bfc\u5165\u5bfc\u51fa\u5e73\u94fa"
+    key_imported_types = "\u5bfc\u5165\u5bfc\u51fa\u7c7b\u578b"
+    key_imported_sigs = "\u5bfc\u5165\u5bfc\u51fa\u7b7e\u540d"
+    key_alias_member_map = "\u522b\u540d\u6210\u5458\u6620\u5c04"
+    key_scope_locals = "\u5f53\u524d\u5c40\u90e8\u53d8\u91cf"
+    key_obj_history = "\u5bf9\u8c61\u6210\u5458\u5386\u53f2"
+
+    _assert_true(context.get(key_import_alias, {}).get(alias_math) == "math", "core context: import alias mapping")
+    _assert_true("sqrt" in context.get(key_imported_flat, set()), "core context: imported flatten members")
+    _assert_true(context.get(key_imported_types, {}).get("sqrt") == "function", "core context: imported member type")
+    _assert_true(context.get(key_imported_sigs, {}).get("sqrt") == "(x)", "core context: imported member signature")
+    _assert_true(ask_func in context.get(key_alias_member_map, {}).get(obj_main, set()), "core context: blueprint instance members")
+    _assert_true(temp_var in context.get(key_scope_locals, set()), "core context: scope locals")
+    _assert_true(ask_func in context.get(key_obj_history, {}).get(obj_main, set()), "core context: object member history")
+    print("[OK] editor core context rules passed")
+
+
+def check_context_snippet_hint_rules() -> None:
+    kw_if = "\u5982\u679c"
+    kw_then = "\u5c31"
+    kw_else_if = "\u5426\u5219\u5982\u679c"
+    kw_else = "\u4e0d\u7136"
+    kw_try = "\u5c1d\u8bd5"
+    kw_catch = "\u5982\u679c\u51fa\u9519"
+    kw_show = "\u663e\u793a"
+
+    code_if = (
+        f"{kw_if} \u5bf9 {kw_then}\n"
+        f"    {kw_show} \"A\"\n"
+        f"{kw_show} \"B\"\n"
+    )
+    hints_if = collect_context_snippet_hints(code_if, 3)
+    _assert_true(kw_else_if in hints_if and kw_else in hints_if, f"context snippet if-hints mismatch: {hints_if}")
+
+    code_try = (
+        f"{kw_try}\n"
+        f"    {kw_show} \"A\"\n"
+        f"{kw_show} \"B\"\n"
+    )
+    hints_try = collect_context_snippet_hints(code_try, 3)
+    _assert_true(kw_catch in hints_try, f"context snippet try-hints mismatch: {hints_try}")
+
+    code_other = f"{kw_show} \"A\"\n{kw_show} \"B\"\n"
+    hints_other = collect_context_snippet_hints(code_other, 2)
+    _assert_true(not hints_other, f"context snippet should be empty: {hints_other}")
+    print("[OK] context snippet helper rules passed")
+
+
+def check_call_context_helper_rules() -> None:
+    parsed_simple = extract_call_context("\u663e\u793a \u6c42\u548c(1, 2")
+    _assert_true(parsed_simple == {"\u8c03\u7528\u540d": "\u6c42\u548c", "\u53c2\u6570\u5e8f\u53f7": 2}, f"call context simple mismatch: {parsed_simple}")
+
+    parsed_member = extract_call_context("obj.run(a")
+    _assert_true(parsed_member == {"\u8c03\u7528\u540d": "obj.run", "\u53c2\u6570\u5e8f\u53f7": 1}, f"call context member mismatch: {parsed_member}")
+
+    parsed_nested_inner = extract_call_context("\u6c42\u548c(\u65b0\u5217\u8868(1, 2), \"a,b\", \u5305\u88c5(3, 4")
+    _assert_true(
+        parsed_nested_inner == {"\u8c03\u7528\u540d": "\u5305\u88c5", "\u53c2\u6570\u5e8f\u53f7": 2},
+        f"call context nested-inner mismatch: {parsed_nested_inner}",
+    )
+
+    parsed_nested_outer = extract_call_context("\u6c42\u548c(\u65b0\u5217\u8868(1, 2), \"a,b\", ")
+    _assert_true(
+        parsed_nested_outer == {"\u8c03\u7528\u540d": "\u6c42\u548c", "\u53c2\u6570\u5e8f\u53f7": 3},
+        f"call context nested-outer mismatch: {parsed_nested_outer}",
+    )
+
+    _assert_true(extract_call_context("\u6c42\u548c(1, 2)") is None, "call context should be None after closed call")
+    _assert_true(extract_call_context("\u663e\u793a \u6570\u503c") is None, "call context should be None without open call")
+    print("[OK] call context helper rules passed")
+
+
+def check_signature_helper_rules() -> None:
+    split_basic = split_signature_params("(a, b)")
+    _assert_true(split_basic == ["a", "b"], f"signature split basic mismatch: {split_basic}")
+
+    split_nested = split_signature_params("(a, \u8c03\u7528(1, 2), \"x,y\", [1,2], {'k': 1})")
+    _assert_true(
+        split_nested == ["a", "\u8c03\u7528(1, 2)", "\"x,y\"", "[1,2]", "{'k': 1}"],
+        f"signature split nested mismatch: {split_nested}",
+    )
+
+    _assert_true(split_signature_params("a, b") == [], "signature split should reject non-parenthesized text")
+    _assert_true(split_signature_params("()") == [], "signature split should return empty list for no params")
+
+    highlighted = highlight_current_signature_param("(a, b, c)", 2)
+    _assert_true(
+        highlighted == ("(a, <<b>>, c)", 2, 3, "b"),
+        f"signature highlight mismatch: {highlighted}",
+    )
+
+    highlighted_clamped = highlight_current_signature_param("(a, b, c)", 9)
+    _assert_true(
+        highlighted_clamped == ("(a, b, <<c>>)", 3, 3, "c"),
+        f"signature highlight clamp mismatch: {highlighted_clamped}",
+    )
+
+    highlighted_empty = highlight_current_signature_param("", 1)
+    _assert_true(highlighted_empty == ("()", 0, 0, ""), f"signature highlight empty mismatch: {highlighted_empty}")
+
+    normalized = normalize_completion_signature("(self, a: int, b=1, *args, **kwargs)")
+    _assert_true(normalized == "(a, b, args, kwargs)", f"signature normalize mismatch: {normalized}")
+    _assert_true(
+        normalize_completion_signature("(a, 1b)") == "()",
+        "signature normalize should fallback for invalid identifier",
+    )
+
+    offset_single = first_argument_span_offset("(arg)")
+    _assert_true(offset_single == (1, 4), f"first argument offset single mismatch: {offset_single}")
+    offset_multi = first_argument_span_offset("(arg1, arg2)")
+    _assert_true(offset_multi == (1, 5), f"first argument offset multi mismatch: {offset_multi}")
+    _assert_true(first_argument_span_offset("()") is None, "first argument offset should be None for empty args")
+    _assert_true(first_argument_span_offset("arg") is None, "first argument offset should be None for invalid snippet")
+    print("[OK] signature helper rules passed")
+
+
+def check_call_signature_helper_rules() -> None:
+    key_func_sigs = "\u529f\u80fd\u7b7e\u540d"
+    key_bp_sigs = "\u56fe\u7eb8\u7b7e\u540d"
+    key_import_sigs = "\u5bfc\u5165\u5bfc\u51fa\u7b7e\u540d"
+    key_alias_member_sig_map = "\u522b\u540d\u6210\u5458\u7b7e\u540d\u6620\u5c04"
+    key_import_alias = "\u5f15\u5165\u522b\u540d"
+
+    context = {
+        key_func_sigs: {"\u6c42\u548c": "(a, b)"},
+        key_bp_sigs: {"\u73a9\u5bb6": "(\u540d\u5b57)"},
+        key_import_sigs: {"sqrt": "(x)"},
+        key_alias_member_sig_map: {
+            "\u6570\u5b66": {"pow": "(x, y)"},
+            "obj": {"run": ""},
+        },
+        key_import_alias: {"\u6570\u5b66": "math"},
+    }
+
+    builtin_words = {"\u8bfb\u6587\u4ef6", "\u8f6c\u6570\u5b57"}
+
+    def builtin_sig(name: str) -> str:
+        table = {
+            "\u8bfb\u6587\u4ef6": "(path)",
+            "\u8f6c\u6570\u5b57": "(value)",
+        }
+        return table.get(str(name), "()")
+
+    def cross_tab_alias(alias: str, _tab_id):
+        return {"\u5916\u90e8": "ext.mod"}.get(str(alias))
+
+    def module_sigs(module_name: str, _tab_id):
+        if str(module_name) == "ext.mod":
+            return {"run": "(payload)"}
+        return {}
+
+    _assert_true(
+        resolve_call_expression_signature("\u6c42\u548c", context, builtin_words, builtin_sig) == "(a, b)",
+        "call signature should prefer local function signature",
+    )
+    _assert_true(
+        resolve_call_expression_signature("\u73a9\u5bb6", context, builtin_words, builtin_sig) == "(\u540d\u5b57)",
+        "call signature should resolve blueprint signature",
+    )
+    _assert_true(
+        resolve_call_expression_signature("sqrt", context, builtin_words, builtin_sig) == "(x)",
+        "call signature should resolve imported symbol signature",
+    )
+    _assert_true(
+        resolve_call_expression_signature("\u6570\u5b66.pow", context, builtin_words, builtin_sig) == "(x, y)",
+        "call signature should resolve alias-member signature",
+    )
+    _assert_true(
+        resolve_call_expression_signature(
+            "\u5916\u90e8.run",
+            context,
+            builtin_words,
+            builtin_sig,
+            cross_tab_alias_resolver=cross_tab_alias,
+            module_member_signature_resolver=module_sigs,
+            tab_id="T1",
+        ) == "(payload)",
+        "call signature should resolve cross-tab module member signature",
+    )
+    _assert_true(
+        resolve_call_expression_signature("obj.run", context, builtin_words, builtin_sig) == "()",
+        "empty alias-member signature should fallback to ()",
+    )
+    _assert_true(
+        resolve_call_expression_signature("obj.\u8bfb\u6587\u4ef6", context, builtin_words, builtin_sig) == "(path)",
+        "member name should fallback to builtin signature",
+    )
+    _assert_true(
+        resolve_call_expression_signature("\u672a\u77e5", context, builtin_words, builtin_sig) == "",
+        "unknown call expression should return empty signature",
+    )
+    print("[OK] call signature helper rules passed")
+
+
+def check_member_completion_helper_rules() -> None:
+    key_alias_member_map = "\u522b\u540d\u6210\u5458\u6620\u5c04"
+    key_alias_member_type_map = "\u522b\u540d\u6210\u5458\u7c7b\u578b\u6620\u5c04"
+    key_alias_member_sig_map = "\u522b\u540d\u6210\u5458\u7b7e\u540d\u6620\u5c04"
+    key_object_history = "\u5bf9\u8c61\u6210\u5458\u5386\u53f2"
+
+    context = {
+        key_alias_member_map: {"obj": {"run"}},
+        key_alias_member_type_map: {"obj": {"run": "function"}},
+        key_alias_member_sig_map: {"obj": {"run": "()"}},
+        key_object_history: {"obj": {"stop"}},
+    }
+
+    target = extract_member_completion_target("show obj.r")
+    _assert_true(target == ("obj", "r"), f"member target parse mismatch: {target}")
+    _assert_true(extract_member_completion_target("show obj.") == ("obj", ""), "member target parse empty prefix failed")
+    _assert_true(extract_member_completion_target("show obj") is None, "member target parse should return None")
+
+    members, member_types, member_signatures = member_completion_seed(context, "obj")
+    _assert_true(members == {"run", "stop"}, f"member seed set mismatch: {members}")
+    _assert_true(member_types.get("run") == "function", f"member seed type mismatch: {member_types}")
+    _assert_true(member_signatures.get("run") == "()", f"member seed signature mismatch: {member_signatures}")
+
+    merged_members, merged_types, merged_signatures = merge_member_completion_fallback(
+        members,
+        member_types,
+        member_signatures,
+        fallback_details={"sqrt": "function"},
+        fallback_signatures={"sqrt": "(x)"},
+    )
+    _assert_true("sqrt" in merged_members, f"member fallback detail merge mismatch: {merged_members}")
+    _assert_true(merged_types.get("sqrt") == "function", f"member fallback type mismatch: {merged_types}")
+    _assert_true(merged_signatures.get("sqrt") == "(x)", f"member fallback signature mismatch: {merged_signatures}")
+
+    merged_members2, merged_types2, merged_signatures2 = merge_member_completion_fallback(
+        members,
+        member_types,
+        member_signatures,
+        fallback_signatures={"stop": "(s)"},
+        fallback_members={"stop", "start"},
+    )
+    _assert_true("start" in merged_members2, f"member fallback member-set merge mismatch: {merged_members2}")
+    _assert_true(merged_types2.get("start") is None, f"member fallback should not add inferred type: {merged_types2}")
+    _assert_true(merged_signatures2.get("stop") == "(s)", f"member fallback signature update mismatch: {merged_signatures2}")
+
+    ranked = rank_member_completion_candidates(
+        merged_members,
+        "s",
+        merged_types,
+        merged_signatures,
+        lambda candidate, prefix: str(candidate).startswith(str(prefix)),
+    )
+    by_name = {item["insert"]: item for item in ranked}
+    _assert_true("sqrt" in by_name, f"member ranking missing sqrt: {ranked}")
+    _assert_true(by_name["sqrt"]["source"] == "member_func", f"member ranking source mismatch: {by_name}")
+    _assert_true(by_name["sqrt"]["callable"] is True, f"member ranking callable mismatch: {by_name}")
+    _assert_true(by_name["sqrt"]["sig"] == "(x)", f"member ranking signature mismatch: {by_name}")
+    print("[OK] member completion helper rules passed")
+
+
+def check_word_completion_helper_rules() -> None:
+    key_func_names = "\u529f\u80fd\u540d"
+    key_bp_names = "\u56fe\u7eb8\u540d"
+    key_var_names = "\u53d8\u91cf\u540d"
+    key_scope_locals = "\u5f53\u524d\u5c40\u90e8\u53d8\u91cf"
+    key_func_sigs = "\u529f\u80fd\u7b7e\u540d"
+    key_bp_sigs = "\u56fe\u7eb8\u7b7e\u540d"
+    key_import_alias = "\u5f15\u5165\u522b\u540d"
+    key_import_modules = "\u5f15\u5165\u6a21\u5757\u540d"
+    key_import_flat = "\u5bfc\u5165\u5bfc\u51fa\u5e73\u94fa"
+    key_import_types = "\u5bfc\u5165\u5bfc\u51fa\u7c7b\u578b"
+    key_import_sigs = "\u5bfc\u5165\u5bfc\u51fa\u7b7e\u540d"
+
+    context = {
+        key_func_names: {"\u8ba1\u7b97"},
+        key_bp_names: {"\u73a9\u5bb6"},
+        key_var_names: {"\u7ed3\u679c"},
+        key_scope_locals: {"\u7ed3\u679c"},
+        key_func_sigs: {"\u8ba1\u7b97": "(a, b)"},
+        key_bp_sigs: {"\u73a9\u5bb6": "(\u540d\u5b57)"},
+        key_import_alias: {"\u6570\u5b66": "math"},
+        key_import_modules: {"math"},
+        key_import_flat: {"sqrt", "pi"},
+        key_import_types: {"sqrt": "function", "pi": "variable"},
+        key_import_sigs: {"sqrt": "(x)"},
+    }
+
+    _assert_true(extract_word_completion_prefix("show abc") == "abc", "word prefix parse mismatch")
+    _assert_true(extract_word_completion_prefix("show abc.") is None, "word prefix parse dot tail should be None")
+
+    autocomplete_words = ["\u663e\u793a", "\u6a21\u677f\u8bcd", "\u8bfb\u6587\u4ef6"]
+    snippets = {"\u6a21\u677f\u8bcd": "snippet body"}
+    builtin_words = {"\u8bfb\u6587\u4ef6"}
+
+    def builtin_sig(name: str) -> str:
+        return "(path)" if str(name) == "\u8bfb\u6587\u4ef6" else ""
+
+    startswith_match = lambda candidate, prefix: str(candidate).startswith(str(prefix))
+
+    ranked_import = rank_word_completion_candidates(
+        "s",
+        context,
+        autocomplete_words,
+        snippets,
+        builtin_words,
+        builtin_sig,
+        startswith_match,
+    )
+    import_map = {item["insert"]: item for item in ranked_import}
+    _assert_true("sqrt" in import_map, f"word ranking missing imported function: {ranked_import}")
+    _assert_true(import_map["sqrt"]["source"] == "imported_func", f"imported source mismatch: {import_map}")
+    _assert_true(import_map["sqrt"]["callable"] is True, f"imported callable mismatch: {import_map}")
+    _assert_true(import_map["sqrt"]["sig"] == "(x)", f"imported signature mismatch: {import_map}")
+
+    ranked_builtin = rank_word_completion_candidates(
+        "\u8bfb",
+        context,
+        autocomplete_words,
+        snippets,
+        builtin_words,
+        builtin_sig,
+        startswith_match,
+    )
+    builtin_map = {item["insert"]: item for item in ranked_builtin}
+    _assert_true("\u8bfb\u6587\u4ef6" in builtin_map, f"word ranking missing builtin: {ranked_builtin}")
+    _assert_true(builtin_map["\u8bfb\u6587\u4ef6"]["source"] == "builtin_func", f"builtin source mismatch: {builtin_map}")
+    _assert_true(builtin_map["\u8bfb\u6587\u4ef6"]["callable"] is True, f"builtin callable mismatch: {builtin_map}")
+    _assert_true(builtin_map["\u8bfb\u6587\u4ef6"]["sig"] == "(path)", f"builtin signature mismatch: {builtin_map}")
+
+    ranked_snippet = rank_word_completion_candidates(
+        "\u6a21",
+        context,
+        autocomplete_words,
+        snippets,
+        builtin_words,
+        builtin_sig,
+        startswith_match,
+        context_snippets={"\u6a21\u677f\u8bcd"},
+    )
+    snippet_map = {item["insert"]: item for item in ranked_snippet}
+    _assert_true("\u6a21\u677f\u8bcd" in snippet_map, f"word ranking missing snippet: {ranked_snippet}")
+    _assert_true(snippet_map["\u6a21\u677f\u8bcd"]["source"] == "snippet", f"snippet source mismatch: {snippet_map}")
+
+    ranked_local_var = rank_word_completion_candidates(
+        "\u7ed3",
+        context,
+        autocomplete_words,
+        snippets,
+        builtin_words,
+        builtin_sig,
+        startswith_match,
+    )
+    var_map = {item["insert"]: item for item in ranked_local_var}
+    _assert_true("\u7ed3\u679c" in var_map, f"word ranking missing local variable: {ranked_local_var}")
+    _assert_true(var_map["\u7ed3\u679c"]["source"] == "variable", f"local variable source mismatch: {var_map}")
+    print("[OK] word completion helper rules passed")
+
 def main() -> int:
     print("=== 编辑器逻辑回归开始 ===")
     check_autocomplete_rules()
     check_export_preflight()
+    check_core_export_preflight_rules()
     check_semantic_scope_rules()
     check_export_entry_resolution()
     check_export_entry_not_hijacked_by_workspace_root()
+    check_export_config_helper_rules()
+    check_core_autocomplete_context_rules()
+    check_context_snippet_hint_rules()
+    check_call_context_helper_rules()
+    check_signature_helper_rules()
+    check_call_signature_helper_rules()
+    check_member_completion_helper_rules()
+    check_word_completion_helper_rules()
     print("=== 编辑器逻辑回归完成：全部通过 ===")
     return 0
 

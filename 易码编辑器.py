@@ -22,12 +22,56 @@ import os
 import json
 import inspect
 import importlib
-import importlib.util
 import time
 
 # 将当前目录添加到系统路径，确保能找到 yima 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from 易码 import 执行源码
+from yima.editor_export_flow import (
+    export_precheck_and_confirm as ui_export_precheck_and_confirm,
+    start_export_packaging_task as ui_start_export_packaging_task,
+)
+from yima.editor_export_ui import (
+    advanced_export_config_dialog as ui_advanced_export_config_dialog,
+    choose_export_mode_dialog as ui_choose_export_mode_dialog,
+)
+from yima.editor_logic_core import (
+    autocomplete_match as core_autocomplete_match,
+    autocomplete_source_group as core_autocomplete_source_group,
+    autocomplete_source_priority as core_autocomplete_source_priority,
+    build_advanced_export_config as core_build_advanced_export_config,
+    builtin_module_exports as core_builtin_module_exports,
+    builtin_word_catalog as core_builtin_word_catalog,
+    collect_autocomplete_context as core_collect_autocomplete_context,
+    collect_block_declarations as core_collect_block_declarations,
+    build_export_confirmation_text as core_build_export_confirmation_text,
+    build_export_defaults as core_build_export_defaults,
+    export_preflight_check as core_export_preflight_check,
+    build_quick_export_config as core_build_quick_export_config,
+    extract_call_context as core_extract_call_context,
+    collect_context_snippet_hints as core_collect_context_snippet_hints,
+    default_module_alias as core_default_module_alias,
+    first_argument_span_offset as core_first_argument_span_offset,
+    format_numbered_messages as core_format_numbered_messages,
+    extract_import_alias_map as core_extract_import_alias_map,
+    extract_member_completion_target as core_extract_member_completion_target,
+    extract_word_completion_prefix as core_extract_word_completion_prefix,
+    member_completion_seed as core_member_completion_seed,
+    merge_member_completion_fallback as core_merge_member_completion_fallback,
+    normalize_completion_signature as core_normalize_completion_signature,
+    rank_member_completion_candidates as core_rank_member_completion_candidates,
+    rank_word_completion_candidates as core_rank_word_completion_candidates,
+    resolve_export_entry as core_resolve_export_entry,
+    semantic_locate_yima_module as core_semantic_locate_yima_module,
+    semantic_analyze as core_semantic_analyze,
+    semantic_module_search_paths as core_semantic_module_search_paths,
+    semantic_read_module_export_details as core_semantic_read_module_export_details,
+    semantic_read_module_export_signatures as core_semantic_read_module_export_signatures,
+    semantic_read_module_exports as core_semantic_read_module_exports,
+    highlight_current_signature_param as core_highlight_current_signature_param,
+    resolve_call_expression_signature as core_resolve_call_expression_signature,
+    sanitize_export_name as core_sanitize_export_name,
+)
 from yima.错误 import 易码错误
 from yima.词法分析 import 词法分析器, Token类型
 from yima.语法分析 import 语法分析器
@@ -222,55 +266,10 @@ class 易码IDE:
         self.root.protocol("WM_DELETE_WINDOW", self.on_app_close)
 
     def _builtin_word_catalog(self):
-        return [
-            "新列表", "加入", "插入", "长度", "删除",
-            "转数字", "转文字", "取随机数",
-            "所有键", "所有值", "存在",
-            "截取", "查找", "替换", "分割", "去空格", "包含",
-            "读文件", "写文件", "追加文件",
-            "文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录",
-            "复制文件", "移动文件", "重命名", "遍历文件",
-            "复制目录", "压缩目录", "解压缩", "哈希文本", "哈希文件", "下载文件",
-            "匹配文件", "文件信息", "目录大小", "格式时间", "解析时间", "写日志", "读日志", "睡眠",
-            "拼路径", "绝对路径", "当前目录", "读环境变量", "写环境变量", "执行命令",
-            "解析JSON", "生成JSON", "读JSON", "写JSON", "读CSV", "写CSV", "读INI", "写INI",
-            "发起请求", "发GET", "发POST", "读响应JSON", "发GET_JSON", "发POST_JSON",
-            "打开数据库", "执行SQL", "查询SQL", "开始事务", "提交事务", "回滚事务", "关闭数据库",
-            "排序", "倒序", "去重", "合并", "最大值", "最小值",
-            "绝对值", "四舍五入", "现在时间", "时间戳",
-            "类型",
-            "显示", "输入",
-            "建窗口", "加文字", "加输入框", "加按钮", "读输入", "改文字", "弹窗", "弹窗输入", "打开界面",
-            "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
-            "画布", "标题", "图标", "向前走", "向后走", "左转", "右转", "抬笔", "落笔", "画笔颜色", "背景颜色", "去", "笔粗",
-            "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画", "刷新画面", "清除", "写字", "开始监听", "绑定按键",
-            "计算距离", "当前X", "当前Y",
-        ]
+        return core_builtin_word_catalog()
 
     def _builtin_module_exports(self):
-        return {
-            "文件管理": ["读文件", "写文件", "追加文件"],
-            "系统工具": [
-                "文件存在", "目录存在", "创建目录", "列出目录", "删除文件", "删除目录",
-                "复制文件", "移动文件", "重命名", "遍历文件",
-                "复制目录", "压缩目录", "解压缩", "哈希文本", "哈希文件", "下载文件",
-                "匹配文件", "文件信息", "目录大小", "格式时间", "解析时间", "写日志", "读日志", "睡眠",
-                "拼路径", "绝对路径", "当前目录", "读环境变量", "写环境变量", "执行命令",
-            ],
-            "数据工具": ["解析JSON", "生成JSON", "读JSON", "写JSON", "读CSV", "写CSV", "读INI", "写INI"],
-            "网络请求": ["发起请求", "发GET", "发POST", "读响应JSON", "发GET_JSON", "发POST_JSON"],
-            "本地数据库": ["打开数据库", "执行SQL", "查询SQL", "关闭数据库", "开始事务", "提交事务", "回滚事务"],
-            "图形界面": [
-                "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面",
-                "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
-            ],
-            "画板": [
-                "画布", "标题", "图标", "向前走", "向后走", "左转", "右转", "抬笔", "落笔", "画笔颜色",
-                "背景颜色", "去", "笔粗", "画圆", "停一下", "定格", "速度", "隐藏画笔", "关闭动画",
-                "刷新画面", "清除", "写字", "开始监听", "绑定按键", "计算距离", "当前X", "当前Y",
-            ],
-            "魔法生态库": sorted(self.builtin_words),
-        }
+        return core_builtin_module_exports(self.builtin_words)
 
     def _style_scrolledtext_vbar(self, text_widget, parent=None):
         """
@@ -1405,623 +1404,53 @@ class 易码IDE:
         self._diagnose_after_id = self.root.after(120, self._run_live_diagnose)
 
     def _默认模块别名(self, 模块名):
-        名称 = str(模块名 or "").replace("\\", "/").rstrip("/")
-        if not 名称:
-            return "模块"
-        名称 = 名称.split("/")[-1]
-        if 名称.endswith(".ym"):
-            名称 = 名称[:-3]
-        return 名称 or "模块"
+        return core_default_module_alias(模块名)
 
     def _收集块声明(self, 语句列表):
-        名称集 = set()
-        函数签名 = {}
-        for 语句 in 语句列表 or []:
-            类型名 = type(语句).__name__
-            if 类型名 == "变量设定节点":
-                名称集.add(getattr(语句, "名称", ""))
-            elif 类型名 == "定义函数节点":
-                函数名 = getattr(语句, "函数名", "")
-                if 函数名:
-                    名称集.add(函数名)
-                    函数签名[函数名] = len(getattr(语句, "参数列表", []) or [])
-            elif 类型名 == "图纸定义节点":
-                图纸名 = getattr(语句, "图纸名", "")
-                if 图纸名:
-                    名称集.add(图纸名)
-            elif 类型名 == "引入语句节点":
-                别名 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
-                if 别名:
-                    名称集.add(别名)
-            elif 类型名 == "重复循环节点":
-                变量名 = getattr(语句, "循环变量名", None)
-                if 变量名:
-                    名称集.add(变量名)
-            elif 类型名 == "遍历循环节点":
-                元素名 = getattr(语句, "元素名", "")
-                if 元素名:
-                    名称集.add(元素名)
-            elif 类型名 == "尝试语句节点":
-                错误名 = getattr(语句, "错误捕获名", None)
-                if 错误名:
-                    名称集.add(错误名)
-        名称集.discard("")
-        return 名称集, 函数签名
+        return core_collect_block_declarations(语句列表, default_alias_resolver=self._默认模块别名)
 
     def _语义模块搜索路径(self, tab_id=None):
-        路径列表 = []
-
-        if tab_id and tab_id in self.tabs_data:
-            文件路径 = self.tabs_data[tab_id].get("filepath")
-            if 文件路径 and os.path.isfile(文件路径):
-                基础目录 = os.path.dirname(os.path.abspath(文件路径))
-                路径列表.extend([基础目录, os.path.join(基础目录, "示例")])
-
-        路径列表.extend([
+        return core_semantic_module_search_paths(
             self.workspace_dir,
-            os.path.join(self.workspace_dir, "示例"),
-            os.getcwd(),
-            os.path.join(os.getcwd(), "示例"),
-        ])
-
-        去重列表 = []
-        for 路径 in 路径列表:
-            if not 路径:
-                continue
-            绝对路径 = os.path.abspath(路径)
-            if 绝对路径 not in 去重列表:
-                去重列表.append(绝对路径)
-        return 去重列表
-
-    def _语义定位易码模块(self, 模块名, tab_id=None):
-        名称 = str(模块名 or "").strip().replace("\\", "/")
-        if not 名称:
-            return None
-
-        if os.path.isabs(名称):
-            if os.path.isfile(名称):
-                return os.path.abspath(名称)
-            if os.path.isfile(名称 + ".ym"):
-                return os.path.abspath(名称 + ".ym")
-            return None
-
-        带后缀 = 名称 if 名称.endswith(".ym") else f"{名称}.ym"
-        for 基础路径 in self._语义模块搜索路径(tab_id):
-            候选列表 = [
-                os.path.join(基础路径, 带后缀),
-                os.path.join(基础路径, 名称),
-            ]
-            for 候选 in 候选列表:
-                if os.path.isfile(候选):
-                    return os.path.abspath(候选)
-        return None
-
-    def _语义正则兜底导出(self, 代码):
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        导出符号 = set()
-        导出类型 = {}
-        导出签名 = {}
-        类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0}
-
-        def 记导出(名称, 类型, 签名=""):
-            名称文本 = str(名称 or "").strip()
-            if not 名称文本:
-                return
-            导出符号.add(名称文本)
-            旧类型 = 导出类型.get(名称文本, "member")
-            if 类型优先级.get(类型, 0) >= 类型优先级.get(旧类型, 0):
-                导出类型[名称文本] = 类型
-            签名文本 = str(签名 or "").strip()
-            if 签名文本 and not 导出签名.get(名称文本):
-                导出签名[名称文本] = 签名文本
-
-        代码文本 = str(代码 or "")
-        功能行模式 = re.compile(rf'^\s*功能\s+({标识符模式})(.*)$')
-        图纸行模式 = re.compile(rf'^\s*定义图纸\s+({标识符模式})(.*)$')
-        变量行模式 = re.compile(rf'^\s*({标识符模式})\s*=')
-        引入行模式 = re.compile(
-            rf'^\s*引入\s*["“](.+?)["”]\s*(?:叫做\s*({标识符模式}))?\s*$'
+            tabs_data=self.tabs_data,
+            tab_id=tab_id,
+            current_workdir=os.getcwd(),
         )
 
-        for 行文本 in 代码文本.splitlines():
-            去空 = 行文本.strip()
-            if not 去空 or 去空.startswith("#"):
-                continue
-
-            功能匹配 = 功能行模式.match(行文本)
-            if 功能匹配:
-                名称 = 功能匹配.group(1)
-                尾部 = str(功能匹配.group(2) or "").strip()
-                参数列表 = []
-                if 尾部.startswith("(") and ")" in 尾部:
-                    参数串 = 尾部[1:尾部.find(")")]
-                    参数列表 = [p.strip() for p in str(参数串).split(",") if p.strip()]
-                else:
-                    需要匹配 = re.search(rf'\b需要\b\s*(.*)$', 尾部)
-                    if 需要匹配:
-                        参数串 = str(需要匹配.group(1) or "").strip()
-                        参数列表 = [p.strip() for p in re.split(r'[,\s]+', 参数串) if p.strip()]
-                记导出(名称, "function", self._格式化参数签名(参数列表))
-                continue
-
-            图纸匹配 = 图纸行模式.match(行文本)
-            if 图纸匹配:
-                名称 = 图纸匹配.group(1)
-                尾部 = str(图纸匹配.group(2) or "").strip()
-                参数列表 = []
-                if 尾部.startswith("(") and ")" in 尾部:
-                    参数串 = 尾部[1:尾部.find(")")]
-                    参数列表 = [p.strip() for p in str(参数串).split(",") if p.strip()]
-                else:
-                    需要匹配 = re.search(rf'\b需要\b\s*(.*)$', 尾部)
-                    if 需要匹配:
-                        参数串 = str(需要匹配.group(1) or "").strip()
-                        参数列表 = [p.strip() for p in re.split(r'[,\s]+', 参数串) if p.strip()]
-                记导出(名称, "blueprint", self._格式化参数签名(参数列表))
-                continue
-
-            变量匹配 = 变量行模式.match(行文本)
-            if 变量匹配:
-                记导出(变量匹配.group(1), "variable")
-                continue
-
-            引入匹配 = 引入行模式.match(行文本)
-            if 引入匹配:
-                模块名 = str(引入匹配.group(1) or "").strip()
-                别名 = str(引入匹配.group(2) or "").strip()
-                名称 = 别名 if 别名 else self._默认模块别名(模块名)
-                记导出(名称, "alias")
-
-        return 导出符号, 导出类型, 导出签名
+    def _语义定位易码模块(self, 模块名, tab_id=None):
+        return core_semantic_locate_yima_module(模块名, self._语义模块搜索路径(tab_id))
 
     def _语义读取模块导出(self, 模块路径):
-        绝对路径 = os.path.abspath(str(模块路径))
-        try:
-            修改时间 = os.stat(绝对路径).st_mtime_ns
-        except OSError as e:
-            return None, f"读取模块信息失败：{e}"
-
-        缓存项 = self._semantic_module_cache.get(绝对路径)
-        if 缓存项 and 缓存项.get("mtime") == 修改时间:
-            return set(缓存项.get("symbols", set())), 缓存项.get("error")
-
-        代码 = ""
-        try:
-            with open(绝对路径, "r", encoding="utf-8") as f:
-                代码 = f.read()
-            语法树 = 语法分析器(词法分析器(代码).分析()).解析()
-        except Exception as e:
-            错误文本 = f"模块解析失败：{e}"
-            兜底符号, 兜底类型, 兜底签名 = self._语义正则兜底导出(代码)
-            if 兜底符号:
-                self._semantic_module_cache[绝对路径] = {
-                    "mtime": 修改时间,
-                    "symbols": set(兜底符号),
-                    "symbol_kinds": dict(兜底类型),
-                    "symbol_signatures": dict(兜底签名),
-                    "error": 错误文本,
-                }
-                return set(兜底符号), None
-            self._semantic_module_cache[绝对路径] = {
-                "mtime": 修改时间,
-                "symbols": set(),
-                "symbol_kinds": {},
-                "symbol_signatures": {},
-                "error": 错误文本,
-            }
-            return None, 错误文本
-
-        导出符号 = set()
-        导出类型 = {}
-        导出签名 = {}
-        类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0}
-
-        def 记导出(名称, 类型, 签名=""):
-            if not 名称:
-                return
-            导出符号.add(名称)
-            旧类型 = 导出类型.get(名称, "member")
-            if 类型优先级.get(类型, 0) >= 类型优先级.get(旧类型, 0):
-                导出类型[名称] = 类型
-            if 签名 and (not 导出签名.get(名称)):
-                导出签名[名称] = 签名
-
-        for 语句 in getattr(语法树, "语句列表", []) or []:
-            类型名 = type(语句).__name__
-            if 类型名 == "变量设定节点":
-                名称 = getattr(语句, "名称", "")
-                记导出(名称, "variable")
-            elif 类型名 == "定义函数节点":
-                名称 = getattr(语句, "函数名", "")
-                参数列表 = list(getattr(语句, "参数列表", []) or [])
-                记导出(名称, "function", self._格式化参数签名(参数列表))
-            elif 类型名 == "图纸定义节点":
-                名称 = getattr(语句, "图纸名", "")
-                参数列表 = list(getattr(语句, "参数列表", []) or [])
-                记导出(名称, "blueprint", self._格式化参数签名(参数列表))
-            elif 类型名 == "引入语句节点":
-                名称 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
-                记导出(名称, "alias")
-
-        self._semantic_module_cache[绝对路径] = {
-            "mtime": 修改时间,
-            "symbols": set(导出符号),
-            "symbol_kinds": dict(导出类型),
-            "symbol_signatures": dict(导出签名),
-            "error": None,
-        }
-        return 导出符号, None
+        return core_semantic_read_module_exports(
+            模块路径,
+            self._semantic_module_cache,
+            self._格式化参数签名,
+            default_alias_resolver=self._默认模块别名,
+        )
 
     def _语义读取模块导出详情(self, 模块路径):
-        绝对路径 = os.path.abspath(str(模块路径))
-        符号, 错误 = self._语义读取模块导出(绝对路径)
-        if 错误:
-            return {}, 错误
-        缓存项 = self._semantic_module_cache.get(绝对路径) or {}
-        类型表 = dict(缓存项.get("symbol_kinds", {}))
-        if not 类型表 and 符号:
-            类型表 = {名称: "member" for 名称 in 符号}
-        return 类型表, None
+        return core_semantic_read_module_export_details(
+            模块路径,
+            self._semantic_module_cache,
+            self._格式化参数签名,
+            default_alias_resolver=self._默认模块别名,
+        )
 
     def _语义读取模块导出签名(self, 模块路径):
-        绝对路径 = os.path.abspath(str(模块路径))
-        _, 错误 = self._语义读取模块导出(绝对路径)
-        if 错误:
-            return {}, 错误
-        缓存项 = self._semantic_module_cache.get(绝对路径) or {}
-        签名表 = dict(缓存项.get("symbol_signatures", {}))
-        return 签名表, None
+        return core_semantic_read_module_export_signatures(
+            模块路径,
+            self._semantic_module_cache,
+            self._格式化参数签名,
+            default_alias_resolver=self._默认模块别名,
+        )
 
     def _语义分析(self, 语法树, tab_id=None):
-        警告列表 = []
-        已记录 = set()
-        内置名称 = set(self.builtin_words)
-        内置名称.update({"对", "错", "空"})
-        内置模块导出 = self._builtin_module_exports()
-
-        def 记警告(行号, 消息, 列号=None, 分类="语义"):
-            try:
-                行号值 = max(1, int(行号 or 1))
-            except (ValueError, TypeError):
-                行号值 = 1
-            try:
-                列号值 = int(列号) if 列号 else None
-            except (ValueError, TypeError):
-                列号值 = None
-            分类值 = str(分类 or "语义")
-            键 = (行号值, 列号值, 消息, 分类值)
-            if 键 in 已记录:
-                return
-            已记录.add(键)
-            警告列表.append({
-                "line": 行号值,
-                "col": 列号值,
-                "message": 消息,
-                "type": "语义提示",
-                "category": 分类值,
-            })
-
-        def 名称已定义(名字, 作用域栈):
-            if not 名字:
-                return True
-            if 名字 in 内置名称:
-                return True
-            for 作用域 in reversed(作用域栈):
-                if 名字 in 作用域:
-                    return True
-            return False
-
-        def 查函数参数个数(名字, 函数栈):
-            for 函数字典 in reversed(函数栈):
-                if 名字 in 函数字典:
-                    return 函数字典[名字]
-            return None
-
-        def 语句定义名称信息(语句):
-            类型名 = type(语句).__name__
-            if 类型名 == "定义函数节点":
-                名称 = getattr(语句, "函数名", "")
-                return (名称, "功能", getattr(语句, "行号", 1)) if 名称 else None
-            if 类型名 == "图纸定义节点":
-                名称 = getattr(语句, "图纸名", "")
-                return (名称, "图纸", getattr(语句, "行号", 1)) if 名称 else None
-            if 类型名 == "引入语句节点":
-                名称 = getattr(语句, "别名", None) or self._默认模块别名(getattr(语句, "模块名", ""))
-                return (名称, "模块别名", getattr(语句, "行号", 1)) if 名称 else None
-            return None
-
-        def 检查参数重复(参数列表, 函数名, 行号, 类型名描述):
-            已有 = set()
-            for 参数 in 参数列表 or []:
-                if 参数 in 已有:
-                    记警告(行号, f"{类型名描述}【{函数名}】的参数【{参数}】重复定义。")
-                else:
-                    已有.add(参数)
-
-        def 收集块内必定赋值名(语句列表):
-            """
-            收集“执行完该代码块后一定会被赋值”的变量名。
-            这里只做轻量静态近似：顺序语句赋值一定成立；带完整不然分支的如果语句取分支交集。
-            """
-            必定赋值 = set()
-            for 语句 in 语句列表 or []:
-                类型名 = type(语句).__name__
-                if 类型名 == "变量设定节点":
-                    名称 = getattr(语句, "名称", "")
-                    if 名称:
-                        必定赋值.add(名称)
-                    continue
-
-                if 类型名 == "如果语句节点":
-                    分支结果 = []
-                    for _, 分支代码 in getattr(语句, "条件分支列表", []) or []:
-                        分支结果.append(收集块内必定赋值名(分支代码))
-
-                    否则分支 = getattr(语句, "否则分支列表", None)
-                    if 否则分支 is None:
-                        continue
-
-                    分支结果.append(收集块内必定赋值名(否则分支))
-                    if 分支结果:
-                        必定赋值.update(set.intersection(*分支结果))
-            return 必定赋值
-
-        def 分析表达式(节点, 作用域栈, 函数栈, 在图纸体=False):
-            if 节点 is None:
-                return
-            类型名 = type(节点).__name__
-
-            if 类型名 == "变量访问节点":
-                名字 = getattr(节点, "名称", "")
-                if not 名称已定义(名字, 作用域栈):
-                    记警告(getattr(节点, "行号", 1), f"名称【{名字}】在当前上下文可能未定义。")
-                return
-
-            if 类型名 == "函数调用节点":
-                名字 = getattr(节点, "函数名", "")
-                参数列表 = getattr(节点, "参数列表", []) or []
-                if not 名称已定义(名字, 作用域栈):
-                    记警告(getattr(节点, "行号", 1), f"调用目标【{名字}】可能未定义。")
-                else:
-                    期望个数 = 查函数参数个数(名字, 函数栈)
-                    if 期望个数 is not None and 期望个数 != len(参数列表):
-                        记警告(getattr(节点, "行号", 1), f"功能【{名字}】参数个数可能不匹配：期望 {期望个数}，实际 {len(参数列表)}。")
-                for 参数 in 参数列表:
-                    分析表达式(参数, 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "动态调用节点":
-                分析表达式(getattr(节点, "目标节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                for 参数 in getattr(节点, "参数列表", []) or []:
-                    分析表达式(参数, 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "二元运算节点":
-                分析表达式(getattr(节点, "左边", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                分析表达式(getattr(节点, "右边", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "一元运算节点":
-                分析表达式(getattr(节点, "操作数", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "属性访问节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "属性设置节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "索引访问节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "索引设置节点":
-                分析表达式(getattr(节点, "对象节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                分析表达式(getattr(节点, "索引节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "列表字面量节点":
-                for 项 in getattr(节点, "元素列表", []) or []:
-                    分析表达式(项, 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "字典字面量节点":
-                for 键节点, 值节点 in getattr(节点, "键值对列表", []) or []:
-                    分析表达式(键节点, 作用域栈, 函数栈, 在图纸体=在图纸体)
-                    分析表达式(值节点, 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "输入表达式节点":
-                分析表达式(getattr(节点, "提示语句表达式", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "实例化节点":
-                图纸名 = getattr(节点, "图纸名", "")
-                if 图纸名 and not 名称已定义(图纸名, 作用域栈):
-                    记警告(getattr(节点, "行号", 1), f"图纸【{图纸名}】可能未定义。")
-                for 参数 in getattr(节点, "参数列表", []) or []:
-                    分析表达式(参数, 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-            if 类型名 == "自身属性访问节点":
-                if not 在图纸体:
-                    记警告(getattr(节点, "行号", 1), "【它的】建议只在图纸定义内部使用。")
-                return
-
-            if 类型名 == "自身属性设置节点":
-                if not 在图纸体:
-                    记警告(getattr(节点, "行号", 1), "【它的】建议只在图纸定义内部使用。")
-                分析表达式(getattr(节点, "值节点", None), 作用域栈, 函数栈, 在图纸体=在图纸体)
-                return
-
-        def 分析代码块(
-            语句列表,
-            上层作用域栈,
-            上层函数栈,
-            额外名称=None,
-            额外函数签名=None,
-            在函数体=False,
-            循环层级=0,
-            在图纸体=False,
-        ):
-            块声明名, 块函数签名 = self._收集块声明(语句列表)
-            本地作用域 = set(块声明名)
-            if 额外名称:
-                本地作用域.update(额外名称)
-            本地函数签名 = dict(块函数签名)
-            if 额外函数签名:
-                本地函数签名.update(额外函数签名)
-            当前作用域栈 = list(上层作用域栈) + [本地作用域]
-            当前函数栈 = list(上层函数栈) + [本地函数签名]
-
-            同块已定义 = {}
-            for 语句 in 语句列表 or []:
-                定义信息 = 语句定义名称信息(语句)
-                if not 定义信息:
-                    continue
-                名称, 定义类型, 行号 = 定义信息
-                if 名称 in 同块已定义:
-                    前类型, 前行号 = 同块已定义[名称]
-                    记警告(行号, f"名称【{名称}】在同一代码块重复定义（前一次：第 {前行号} 行，类型：{前类型}）。")
-                else:
-                    同块已定义[名称] = (定义类型, 行号)
-
-            for 语句 in 语句列表 or []:
-                类型名 = type(语句).__name__
-                if 类型名 == "显示语句节点":
-                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-                elif 类型名 == "变量设定节点":
-                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-                elif 类型名 == "如果语句节点":
-                    分支赋值集合列表 = []
-                    for 条件, 分支 in getattr(语句, "条件分支列表", []) or []:
-                        分析表达式(条件, 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-                        分析代码块(分支, 当前作用域栈, 当前函数栈, 在函数体=在函数体, 循环层级=循环层级, 在图纸体=在图纸体)
-                        分支赋值集合列表.append(收集块内必定赋值名(分支))
-                    否则分支 = getattr(语句, "否则分支列表", None)
-                    是否有否则 = 否则分支 is not None
-                    if 是否有否则:
-                        分析代码块(否则分支, 当前作用域栈, 当前函数栈, 在函数体=在函数体, 循环层级=循环层级, 在图纸体=在图纸体)
-                        分支赋值集合列表.append(收集块内必定赋值名(否则分支))
-                    # 只有在存在“否则”时，才认为变量一定会被赋值；将所有分支共同赋值的变量提升到当前块作用域。
-                    if 是否有否则 and 分支赋值集合列表:
-                        必定赋值名 = set.intersection(*分支赋值集合列表)
-                        if 必定赋值名:
-                            当前作用域栈[-1].update(必定赋值名)
-                elif 类型名 == "当循环节点":
-                    分析表达式(getattr(语句, "条件", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-                    分析代码块(
-                        getattr(语句, "循环体", []),
-                        当前作用域栈,
-                        当前函数栈,
-                        在函数体=在函数体,
-                        循环层级=循环层级 + 1,
-                        在图纸体=在图纸体,
-                    )
-                elif 类型名 == "重复循环节点":
-                    分析表达式(getattr(语句, "次数表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-                    额外名 = set()
-                    变量名 = getattr(语句, "循环变量名", None)
-                    if 变量名:
-                        额外名.add(变量名)
-                    分析代码块(
-                        getattr(语句, "循环体", []),
-                        当前作用域栈,
-                        当前函数栈,
-                        额外名称=额外名,
-                        在函数体=在函数体,
-                        循环层级=循环层级 + 1,
-                        在图纸体=在图纸体,
-                    )
-                elif 类型名 == "遍历循环节点":
-                    分析表达式(getattr(语句, "列表表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-                    额外名 = set()
-                    元素名 = getattr(语句, "元素名", "")
-                    if 元素名:
-                        额外名.add(元素名)
-                    分析代码块(
-                        getattr(语句, "循环体", []),
-                        当前作用域栈,
-                        当前函数栈,
-                        额外名称=额外名,
-                        在函数体=在函数体,
-                        循环层级=循环层级 + 1,
-                        在图纸体=在图纸体,
-                    )
-                elif 类型名 == "尝试语句节点":
-                    分析代码块(
-                        getattr(语句, "尝试代码块", []),
-                        当前作用域栈,
-                        当前函数栈,
-                        在函数体=在函数体,
-                        循环层级=循环层级,
-                        在图纸体=在图纸体,
-                    )
-                    额外名 = set()
-                    错误名 = getattr(语句, "错误捕获名", None)
-                    if 错误名:
-                        额外名.add(错误名)
-                    分析代码块(
-                        getattr(语句, "出错代码块", []),
-                        当前作用域栈,
-                        当前函数栈,
-                        额外名称=额外名,
-                        在函数体=在函数体,
-                        循环层级=循环层级,
-                        在图纸体=在图纸体,
-                    )
-                elif 类型名 == "定义函数节点":
-                    函数名 = getattr(语句, "函数名", "")
-                    参数列表 = list(getattr(语句, "参数列表", []) or [])
-                    检查参数重复(参数列表, 函数名 or "匿名功能", getattr(语句, "行号", 1), "功能")
-                    参数名 = set(参数列表)
-                    分析代码块(
-                        getattr(语句, "代码块", []),
-                        当前作用域栈,
-                        当前函数栈,
-                        额外名称=参数名,
-                        在函数体=True,
-                        循环层级=0,
-                        在图纸体=在图纸体,
-                    )
-                elif 类型名 == "图纸定义节点":
-                    图纸名 = getattr(语句, "图纸名", "")
-                    参数列表 = list(getattr(语句, "参数列表", []) or [])
-                    检查参数重复(参数列表, 图纸名 or "匿名图纸", getattr(语句, "行号", 1), "图纸")
-                    参数名 = set(参数列表)
-                    分析代码块(
-                        getattr(语句, "代码块", []),
-                        当前作用域栈,
-                        当前函数栈,
-                        额外名称=参数名,
-                        在函数体=False,
-                        循环层级=0,
-                        在图纸体=True,
-                    )
-                elif 类型名 == "返回语句节点":
-                    if not 在函数体:
-                        记警告(getattr(语句, "行号", 1), "【返回】建议只在功能内部使用。")
-                    分析表达式(getattr(语句, "表达式", None), 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-                elif 类型名 == "跳出语句节点":
-                    if 循环层级 <= 0:
-                        记警告(getattr(语句, "行号", 1), "【停下】建议只在循环内部使用。")
-                elif 类型名 == "继续语句节点":
-                    if 循环层级 <= 0:
-                        记警告(getattr(语句, "行号", 1), "【略过】建议只在循环内部使用。")
-                elif 类型名 == "引入语句节点":
-                    continue
-                else:
-                    分析表达式(语句, 当前作用域栈, 当前函数栈, 在图纸体=在图纸体)
-
-        顶层语句 = getattr(语法树, "语句列表", []) or []
-        分析代码块(顶层语句, [set(内置名称)], [dict()], 在函数体=False, 循环层级=0, 在图纸体=False)
-        警告列表.sort(key=lambda x: (x.get("line") or 1, x.get("col") or 0))
-        return 警告列表
+        return core_semantic_analyze(
+            语法树,
+            self.builtin_words,
+            default_alias_resolver=self._默认模块别名,
+            collect_block_declarations_func=self._收集块声明,
+        )
 
     def _run_live_diagnose(self):
         self._diagnose_after_id = None
@@ -2109,34 +1538,6 @@ class 易码IDE:
         match = re.search(r'[\u4e00-\u9fa5a-zA-Z0-9_]+$', line_text_before)
         return insert_idx, line_start, (match.group(0) if match else "")
 
-    def _tab_find_nearby_standalone_snippet_line(self, editor, center_line):
-        """在光标附近寻找“只输入了模板关键词”的独立行，避免 Tab 误在旧行展开。"""
-        try:
-            total_lines = int(editor.index("end-1c").split(".")[0])
-            center = int(center_line)
-        except Exception:
-            return None
-
-        low = max(1, center - 4)
-        high = min(total_lines, center + 8)
-        candidates = []
-        for line_no in range(low, high + 1):
-            try:
-                line_text = editor.get(f"{line_no}.0", f"{line_no}.end")
-            except tk.TclError:
-                continue
-            stripped = line_text.strip()
-            if not stripped:
-                continue
-            # 只匹配“整行就是关键词”的情况，避免误把已展开的模板行再次识别。
-            if stripped in self.snippets and "‹" not in stripped and "›" not in stripped:
-                candidates.append(line_no)
-
-        if not candidates:
-            return None
-        # 同距离时优先选择更靠下的一行（更接近“刚输入”的场景）。
-        return sorted(candidates, key=lambda ln: (abs(ln - center), -ln))[0]
-
     def _tab_selection_info(self, editor, insert_idx=None):
         try:
             sel_start = editor.index(tk.SEL_FIRST)
@@ -2188,39 +1589,6 @@ class 易码IDE:
         self._last_edit_index = idx
         self._last_edit_word = str(word or "")
         self._last_edit_ts = time.monotonic()
-
-    def _tab_placeholder_range_on_line(self, editor, index_value):
-        try:
-            index_text = editor.index(index_value)
-            line_text, col_text = index_text.split(".")
-            line_no = int(line_text)
-            col_no = int(col_text)
-        except Exception:
-            return (None, None)
-        try:
-            line_code = editor.get(f"{line_no}.0", f"{line_no}.end")
-        except tk.TclError:
-            return (None, None)
-            
-        # 寻找包含光标位置的最内层 ‹ 和 ›
-        left = line_code.rfind("‹", 0, max(0, col_no) + 1)
-        if left != -1:
-            # 找到左括号后，向右寻找右括号，起点是左括号位置，而非光标位置
-            right = line_code.find("›", left)
-            if right != -1:
-                # 只要光标在这个括号范围内（或者刚超出一点点，代表可能刚刚在括号内打完字）
-                if left <= col_no <= right + 1:
-                    return (f"{line_no}.{left}", f"{line_no}.{right + 1}")
-        
-        # 容错：如果光标刚好跑到了右括号外面一个字符（如：删除了再输入导致偏移）
-        left = line_code.rfind("‹", 0, max(0, col_no))
-        if left != -1:
-            right = line_code.find("›", left)
-            if right != -1:
-                if left <= col_no <= right + 2:
-                    return (f"{line_no}.{left}", f"{line_no}.{right + 1}")
-                    
-        return (None, None)
 
     def _tab_jump_to_next_placeholder(self, editor, from_index):
         try:
@@ -3587,131 +2955,17 @@ class 易码IDE:
         except tk.TclError:
             pass
 
-    def _标准化补全签名(self, 签名):
-        签名文本 = str(签名 or "").strip()
-        if not 签名文本:
-            return "()"
-        if not (签名文本.startswith("(") and 签名文本.endswith(")")):
-            return "()"
-
-        参数列表 = self._拆分签名参数(签名文本)
-        清洗后 = []
-        标识符模式 = re.compile(r'^[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*$')
-        for 原参数 in 参数列表:
-            参数 = str(原参数 or "").strip()
-            if not 参数:
-                continue
-            if 参数 in {"self", "cls", "/", "*"}:
-                continue
-            if 参数.startswith("**"):
-                参数 = 参数[2:].strip()
-            elif 参数.startswith("*"):
-                参数 = 参数[1:].strip()
-            if ":" in 参数:
-                参数 = 参数.split(":", 1)[0].strip()
-            if "=" in 参数:
-                参数 = 参数.split("=", 1)[0].strip()
-            if not 参数:
-                continue
-            if not 标识符模式.match(参数):
-                # 签名格式不标准时，保底退回空参括号，避免插入噪声
-                return "()"
-            清洗后.append(参数)
-        if not 清洗后:
-            return "()"
-        return "(" + ", ".join(清洗后) + ")"
-
-    def _补全首参数区间偏移(self, 调用片段):
-        文本 = str(调用片段 or "")
-        if not 文本.startswith("("):
-            return None
-        结束 = 文本.find(")")
-        if 结束 <= 1:
-            return None
-        逗号 = 文本.find(",", 1, 结束)
-        参数终点 = 逗号 if 逗号 > 0 else 结束
-        if 参数终点 <= 1:
-            return None
-        return (1, 参数终点)
-
     def _导出前置检查(self, 源码入口, 打包配置, 输出路径):
-        错误列表 = []
-        警告列表 = []
-
-        入口路径 = os.path.abspath(str(源码入口 or "").strip()) if 源码入口 else ""
-        if not 入口路径 or not os.path.isfile(入口路径):
-            错误列表.append("入口脚本不存在，请先保存并确认主程序路径。")
-
-        if not self.workspace_dir or not os.path.isdir(self.workspace_dir):
-            错误列表.append("当前项目目录无效，请先打开一个有效项目目录。")
-
-        工具根目录 = os.path.dirname(os.path.abspath(__file__))
-        打包工具路径 = os.path.join(工具根目录, "易码打包工具.py")
-        核心库目录 = os.path.join(工具根目录, "yima")
-        if not os.path.isfile(打包工具路径):
-            错误列表.append("缺少打包工具文件：易码打包工具.py")
-        if not os.path.isdir(核心库目录):
-            错误列表.append("缺少运行时核心目录：yima")
-
-        输出绝对路径 = os.path.abspath(os.path.expanduser(str(输出路径 or "").strip()))
-        输出目录 = os.path.dirname(输出绝对路径) or self.workspace_dir
-        if not 输出绝对路径.lower().endswith(".exe"):
-            错误列表.append("输出路径必须以 .exe 结尾。")
-        try:
-            os.makedirs(输出目录, exist_ok=True)
-        except Exception as e:
-            错误列表.append(f"无法创建输出目录：{输出目录}（{e}）")
-
-        if os.path.isdir(输出目录):
-            测试文件 = os.path.join(输出目录, f".yima_export_probe_{int(time.time() * 1000)}.tmp")
-            try:
-                with open(测试文件, "w", encoding="utf-8") as f:
-                    f.write("ok")
-                os.remove(测试文件)
-            except Exception as e:
-                错误列表.append(f"输出目录不可写：{输出目录}（{e}）")
-
-        图标路径 = str((打包配置 or {}).get("图标路径") or "").strip()
-        if 图标路径:
-            图标绝对 = os.path.abspath(os.path.expanduser(图标路径))
-            if not os.path.isfile(图标绝对):
-                错误列表.append(f"图标文件不存在：{图标绝对}")
-            elif not 图标绝对.lower().endswith(".ico"):
-                警告列表.append("图标建议使用 .ico 格式，其他格式在部分系统上可能不稳定。")
-
-        软件名称 = str((打包配置 or {}).get("软件名称") or "").strip()
-        if not 软件名称:
-            错误列表.append("软件名称不能为空。")
-        elif 软件名称 != self._sanitize_export_name(软件名称):
-            警告列表.append("软件名称包含非法字符，实际文件名会被自动清理。")
-
-        # 扫描入口文件中的引入依赖，尽早提示“模块找不到”
-        try:
-            if 入口路径 and os.path.isfile(入口路径):
-                with open(入口路径, "r", encoding="utf-8") as f:
-                    入口源码 = f.read()
-                引入别名 = self._提取引入别名映射(入口源码)
-                内置模块集合 = set(self._builtin_module_exports().keys())
-                缺失模块 = []
-                for 模块名 in sorted(set(引入别名.values())):
-                    名称 = str(模块名 or "").strip()
-                    if not 名称 or 名称 in 内置模块集合:
-                        continue
-                    本地模块路径 = self._语义定位易码模块(名称)
-                    if 本地模块路径:
-                        continue
-                    try:
-                        if importlib.util.find_spec(名称) is not None:
-                            continue
-                    except Exception:
-                        pass
-                    缺失模块.append(名称)
-                if 缺失模块:
-                    错误列表.append("入口引入中存在无法解析的模块：" + "、".join(缺失模块))
-        except Exception as e:
-            警告列表.append(f"未完成依赖预扫描：{e}")
-
-        return 错误列表, 警告列表
+        return core_export_preflight_check(
+            source_entry=源码入口,
+            package_config=打包配置,
+            output_path=输出路径,
+            workspace_dir=self.workspace_dir,
+            tool_root_dir=os.path.dirname(os.path.abspath(__file__)),
+            sanitize_export_name_func=self._sanitize_export_name,
+            builtin_module_names=set(self._builtin_module_exports().keys()),
+            module_locator=lambda 模块名: self._语义定位易码模块(模块名),
+        )
 
     def _flash_calltip(self):
         try:
@@ -3804,197 +3058,6 @@ class 易码IDE:
         self._ensure_runtime_builtin_signatures()
         return str(self._runtime_builtin_signature_cache.get(str(名称), "()") or "()")
 
-    def _拆分签名参数(self, 签名):
-        签名文本 = str(签名 or "").strip()
-        if not 签名文本.startswith("(") or not 签名文本.endswith(")"):
-            return []
-        内文 = 签名文本[1:-1]
-        if not 内文.strip():
-            return []
-        结果 = []
-        当前 = []
-        括号层 = 0
-        方括号层 = 0
-        花括号层 = 0
-        字符串引号 = ""
-        转义 = False
-        for ch in 内文:
-            if 字符串引号:
-                当前.append(ch)
-                if 转义:
-                    转义 = False
-                elif ch == "\\":
-                    转义 = True
-                elif ch == 字符串引号:
-                    字符串引号 = ""
-                continue
-            if ch in ("'", '"'):
-                字符串引号 = ch
-                当前.append(ch)
-                continue
-            if ch == "(":
-                括号层 += 1
-            elif ch == ")" and 括号层 > 0:
-                括号层 -= 1
-            elif ch == "[":
-                方括号层 += 1
-            elif ch == "]" and 方括号层 > 0:
-                方括号层 -= 1
-            elif ch == "{":
-                花括号层 += 1
-            elif ch == "}" and 花括号层 > 0:
-                花括号层 -= 1
-            if ch == "," and 括号层 == 0 and 方括号层 == 0 and 花括号层 == 0:
-                结果.append("".join(当前).strip())
-                当前 = []
-                continue
-            当前.append(ch)
-        if 当前:
-            结果.append("".join(当前).strip())
-        return [p for p in 结果 if p != ""]
-
-    def _高亮当前参数签名(self, 签名, 参数序号):
-        签名文本 = str(签名 or "").strip()
-        if not 签名文本:
-            return "()", 0, 0, ""
-        参数列表 = self._拆分签名参数(签名文本)
-        if not 参数列表:
-            return 签名文本, 0, 0, ""
-        try:
-            idx = max(0, int(参数序号) - 1)
-        except Exception:
-            idx = 0
-        if idx >= len(参数列表):
-            idx = len(参数列表) - 1
-
-        当前参数名 = str(参数列表[idx] or "").strip()
-        # 使用更醒目的 ASCII 包裹，减少字体兼容差异导致的视觉不明显
-        参数列表[idx] = f"<<{参数列表[idx]}>>"
-        return "(" + ", ".join(参数列表) + ")", idx + 1, len(参数列表), 当前参数名
-
-    def _解析当前调用上下文(self, 行前文本):
-        文本 = str(行前文本 or "")
-        if not 文本:
-            return None
-
-        括号层 = 0
-        方括号层 = 0
-        花括号层 = 0
-        开括号位置 = -1
-        for i in range(len(文本) - 1, -1, -1):
-            ch = 文本[i]
-            if ch == ")":
-                括号层 += 1
-                continue
-            if ch == "]":
-                方括号层 += 1
-                continue
-            if ch == "}":
-                花括号层 += 1
-                continue
-            if ch == "(":
-                if 括号层 == 0 and 方括号层 == 0 and 花括号层 == 0:
-                    开括号位置 = i
-                    break
-                if 括号层 > 0:
-                    括号层 -= 1
-                continue
-            if ch == "[" and 方括号层 > 0:
-                方括号层 -= 1
-                continue
-            if ch == "{" and 花括号层 > 0:
-                花括号层 -= 1
-                continue
-        if 开括号位置 < 0:
-            return None
-
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        左侧文本 = 文本[:开括号位置]
-        名称匹配 = re.search(rf'({标识符模式}(?:\.{标识符模式})*)\s*$', 左侧文本)
-        if not 名称匹配:
-            return None
-        调用名 = 名称匹配.group(1)
-
-        参数区域 = 文本[开括号位置 + 1:]
-        逗号数 = 0
-        括号层 = 0
-        方括号层 = 0
-        花括号层 = 0
-        字符串引号 = ""
-        转义 = False
-        for ch in 参数区域:
-            if 字符串引号:
-                if 转义:
-                    转义 = False
-                elif ch == "\\":
-                    转义 = True
-                elif ch == 字符串引号:
-                    字符串引号 = ""
-                continue
-            if ch in ("'", '"'):
-                字符串引号 = ch
-                continue
-            if ch == "(":
-                括号层 += 1
-                continue
-            if ch == ")" and 括号层 > 0:
-                括号层 -= 1
-                continue
-            if ch == "[":
-                方括号层 += 1
-                continue
-            if ch == "]" and 方括号层 > 0:
-                方括号层 -= 1
-                continue
-            if ch == "{":
-                花括号层 += 1
-                continue
-            if ch == "}" and 花括号层 > 0:
-                花括号层 -= 1
-                continue
-            if ch == "," and 括号层 == 0 and 方括号层 == 0 and 花括号层 == 0:
-                逗号数 += 1
-
-        参数序号 = 1 if not 参数区域.strip() else (逗号数 + 1)
-        return {"调用名": 调用名, "参数序号": 参数序号}
-
-    def _解析调用表达式签名(self, 调用表达式, 上下文, tab_id=None):
-        名称 = str(调用表达式 or "").strip()
-        if not 名称:
-            return ""
-
-        功能签名 = dict((上下文 or {}).get("功能签名", {}) or {})
-        图纸签名 = dict((上下文 or {}).get("图纸签名", {}) or {})
-        导入签名 = dict((上下文 or {}).get("导入导出签名", {}) or {})
-        别名签名映射 = dict((上下文 or {}).get("别名成员签名映射", {}) or {})
-        引入别名 = dict((上下文 or {}).get("引入别名", {}) or {})
-
-        if 名称 in 功能签名:
-            return 功能签名[名称]
-        if 名称 in 图纸签名:
-            return 图纸签名[名称]
-        if 名称 in 导入签名:
-            return 导入签名[名称]
-        if 名称 in self.builtin_words:
-            return self._builtin_signature_of(名称)
-
-        if "." in 名称:
-            片段 = 名称.split(".")
-            对象名 = 片段[0].strip()
-            成员名 = 片段[-1].strip()
-            模块成员签名 = dict(别名签名映射.get(对象名, {}) or {})
-            if 成员名 in 模块成员签名:
-                return str(模块成员签名.get(成员名) or "()")
-            模块名 = 引入别名.get(对象名) or self._跨标签查别名模块(对象名, 当前tab_id=tab_id)
-            if 模块名:
-                签名表 = self._获取模块补全成员签名(模块名, tab_id=tab_id)
-                if 成员名 in 签名表:
-                    return str(签名表.get(成员名) or "()")
-            if 成员名 in self.builtin_words:
-                return self._builtin_signature_of(成员名)
-
-        return ""
-
     def _update_calltip(self, editor=None, tab_id=None, 全文=None, 行前文本=None, 上下文=None, emphasize=False):
         编辑器 = editor if editor else self._get_current_editor()
         if not 编辑器:
@@ -4010,7 +3073,7 @@ class 易码IDE:
             self._hide_calltip()
             return
 
-        调用上下文 = self._解析当前调用上下文(行前文本)
+        调用上下文 = core_extract_call_context(行前文本)
         if not 调用上下文:
             self._hide_calltip()
             return
@@ -4020,12 +3083,23 @@ class 易码IDE:
         except Exception:
             光标行 = 1
         调用上下文数据 = 上下文 if 上下文 is not None else self._收集补全上下文(全文 or "", tab_id=当前tab, 光标行=光标行)
-        签名 = self._解析调用表达式签名(调用上下文["调用名"], 调用上下文数据, tab_id=当前tab)
+        签名 = core_resolve_call_expression_signature(
+            调用上下文["调用名"],
+            调用上下文数据,
+            self.builtin_words,
+            self._builtin_signature_of,
+            cross_tab_alias_resolver=lambda 别名, 当前tab: self._跨标签查别名模块(别名, 当前tab_id=当前tab),
+            module_member_signature_resolver=lambda 模块名, 当前tab: self._获取模块补全成员签名(模块名, tab_id=当前tab),
+            tab_id=当前tab,
+        )
         if not 签名:
             self._hide_calltip()
             return
 
-        高亮签名, 参数位次, 参数总数, 当前参数名 = self._高亮当前参数签名(签名, 调用上下文["参数序号"])
+        高亮签名, 参数位次, 参数总数, 当前参数名 = core_highlight_current_signature_param(
+            签名,
+            调用上下文["参数序号"],
+        )
         if 参数总数 > 0:
             参数说明 = f"当前参数：第 {参数位次}/{参数总数} 个"
             if 当前参数名:
@@ -4036,75 +3110,13 @@ class 易码IDE:
         self._show_calltip(编辑器, 提示文本, emphasize=bool(emphasize))
 
     def _autocomplete_match(self, 候选词, 前缀):
-        if not 候选词:
-            return False
-        if not 前缀:
-            return True
-        词 = str(候选词 or "")
-        前 = str(前缀 or "")
-        if 词 == 前:
-            return True
-        if 词.startswith(前):
-            return True
-        # 默认关闭模糊包含匹配，避免“看起来能用、实际不该推荐”的噪声候选。
-        if self.autocomplete_fuzzy_enabled and len(前) >= 2:
-            return 前 in 词
-        return False
+        return core_autocomplete_match(候选词, 前缀, fuzzy_enabled=self.autocomplete_fuzzy_enabled)
 
     def _autocomplete_source_priority(self, 来源):
-        """
-        统一候选排序优先级（越小越优先）：
-        1) 当前文件定义（功能/图纸/变量/别名）
-        2) 已引入成员（含 点号成员/已引入平铺成员）
-        3) 内置能力
-        4) 关键字
-        5) 模板
-        """
-        来源值 = str(来源 or "").strip()
-        优先级 = {
-            "function": 0,
-            "blueprint": 0,
-            "variable": 0,
-            "alias": 0,
-            "module": 0,
-
-            "member": 1,
-            "member_func": 1,
-            "member_blueprint": 1,
-            "member_class": 1,
-            "member_var": 1,
-            "member_alias": 1,
-            "imported": 1,
-            "imported_func": 1,
-            "imported_blueprint": 1,
-            "imported_class": 1,
-            "imported_var": 1,
-            "imported_alias": 1,
-
-            "builtin": 2,
-            "builtin_func": 2,
-
-            "keyword": 3,
-            "snippet": 4,
-        }
-        return 优先级.get(来源值, 9)
+        return core_autocomplete_source_priority(来源)
 
     def _autocomplete_source_group(self, 来源):
-        来源值 = str(来源 or "").strip()
-        if 来源值 in {"function", "blueprint", "variable", "alias", "module"}:
-            return "current", "当前文件"
-        if 来源值 in {
-            "member", "member_func", "member_blueprint", "member_class", "member_var", "member_alias",
-            "imported", "imported_func", "imported_blueprint", "imported_class", "imported_var", "imported_alias",
-        }:
-            return "imported", "已引入"
-        if 来源值 in {"builtin", "builtin_func"}:
-            return "builtin", "内置能力"
-        if 来源值 == "keyword":
-            return "keyword", "关键字"
-        if 来源值 == "snippet":
-            return "snippet", "模板"
-        return "other", "其他"
+        return core_autocomplete_source_group(来源)
 
     def _sort_autocomplete_candidates(self, 候选列表):
         def 排序键(候选):
@@ -4134,201 +3146,6 @@ class 易码IDE:
             return f"{签名[:41]}...)"
         return 签名
 
-    def _提取定义签名(self, 全文):
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        内容 = 全文 or ""
-        功能签名 = {}
-        图纸签名 = {}
-        功能模式 = re.compile(
-            rf'^\s*功能\s+({标识符模式})\s*(?:\((.*?)\))?',
-            re.MULTILINE,
-        )
-        图纸模式 = re.compile(
-            rf'^\s*定义图纸\s+({标识符模式})\s*(?:\((.*?)\))?',
-            re.MULTILINE,
-        )
-
-        for 名称, 参数串 in 功能模式.findall(内容):
-            参数列表 = [p.strip() for p in str(参数串 or "").split(",") if p.strip()]
-            功能签名[名称] = self._格式化参数签名(参数列表)
-        for 名称, 参数串 in 图纸模式.findall(内容):
-            参数列表 = [p.strip() for p in str(参数串 or "").split(",") if p.strip()]
-            图纸签名[名称] = self._格式化参数签名(参数列表)
-        return 功能签名, 图纸签名
-
-    def _提取图纸成员映射(self, 全文):
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        行列表 = (全文 or "").splitlines()
-        图纸成员映射 = {}
-        图纸成员类型映射 = {}
-        图纸成员签名映射 = {}
-
-        图纸头模式 = re.compile(rf'^\s*定义图纸\s+({标识符模式})\s*(?:\((.*?)\))?')
-        功能头模式 = re.compile(rf'^\s*功能\s+({标识符模式})\s*(?:\((.*?)\))?')
-        自身属性模式 = re.compile(rf'^\s*它的\s+({标识符模式})\b')
-
-        i = 0
-        while i < len(行列表):
-            行文本 = 行列表[i]
-            匹配 = 图纸头模式.match(行文本)
-            if not 匹配:
-                i += 1
-                continue
-
-            图纸名 = str(匹配.group(1) or "").strip()
-            if not 图纸名:
-                i += 1
-                continue
-            图纸缩进 = self._行首缩进宽度(行文本)
-
-            成员集 = set(图纸成员映射.get(图纸名, set()))
-            类型表 = dict(图纸成员类型映射.get(图纸名, {}))
-            签名表 = dict(图纸成员签名映射.get(图纸名, {}))
-
-            i += 1
-            while i < len(行列表):
-                子行 = 行列表[i]
-                去空 = 子行.strip()
-                if not 去空 or 去空.startswith("#"):
-                    i += 1
-                    continue
-
-                子缩进 = self._行首缩进宽度(子行)
-                if 子缩进 <= 图纸缩进:
-                    break
-
-                功能匹配 = 功能头模式.match(子行)
-                if 功能匹配:
-                    名称 = str(功能匹配.group(1) or "").strip()
-                    参数串 = str(功能匹配.group(2) or "")
-                    参数列表 = [p.strip() for p in 参数串.split(",") if p.strip()]
-                    if 名称:
-                        成员集.add(名称)
-                        类型表[名称] = "function"
-                        签名表[名称] = self._格式化参数签名(参数列表)
-                    i += 1
-                    continue
-
-                属性匹配 = 自身属性模式.match(子行)
-                if 属性匹配:
-                    名称 = str(属性匹配.group(1) or "").strip()
-                    if 名称:
-                        成员集.add(名称)
-                        类型表[名称] = "variable"
-                    i += 1
-                    continue
-
-                i += 1
-
-            图纸成员映射[图纸名] = 成员集
-            图纸成员类型映射[图纸名] = 类型表
-            图纸成员签名映射[图纸名] = 签名表
-
-        return 图纸成员映射, 图纸成员类型映射, 图纸成员签名映射
-
-    def _提取对象实例映射(self, 全文):
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        映射 = {}
-        模式 = re.compile(
-            rf'^\s*({标识符模式})\s*=\s*造一个\s+({标识符模式})\b',
-            re.MULTILINE,
-        )
-        for 对象名, 图纸名 in 模式.findall(全文 or ""):
-            对象名 = str(对象名 or "").strip()
-            图纸名 = str(图纸名 or "").strip()
-            if 对象名 and 图纸名:
-                映射[对象名] = 图纸名
-        return 映射
-
-    def _行首缩进宽度(self, 行文本):
-        行 = str(行文本 or "").replace("\t", "    ")
-        return len(行) - len(行.lstrip(" "))
-
-    def _提取当前作用域局部变量(self, 全文, 光标行):
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        内容 = 全文 or ""
-        行列表 = 内容.splitlines()
-        if not 行列表:
-            return set()
-
-        try:
-            目标行 = int(光标行 or 1)
-        except (TypeError, ValueError):
-            目标行 = 1
-        目标行 = max(1, min(目标行, len(行列表)))
-
-        作用域栈 = []
-        功能头模式 = re.compile(rf'^\s*功能\s+({标识符模式})\s*(?:\((.*?)\))?')
-        图纸头模式 = re.compile(rf'^\s*定义图纸\s+({标识符模式})\s*(?:\((.*?)\))?')
-
-        for 行号 in range(1, 目标行 + 1):
-            行文本 = 行列表[行号 - 1]
-            去空 = 行文本.strip()
-            if not 去空 or 去空.startswith("#"):
-                continue
-
-            缩进 = self._行首缩进宽度(行文本)
-            while 作用域栈 and 行号 > 作用域栈[-1]["line"] and 缩进 <= 作用域栈[-1]["indent"]:
-                作用域栈.pop()
-
-            匹配 = 功能头模式.match(行文本) or 图纸头模式.match(行文本)
-            if 匹配:
-                参数串 = str(匹配.group(2) or "")
-                参数列表 = [p.strip() for p in 参数串.split(",") if p.strip()]
-                作用域栈.append({
-                    "line": 行号,
-                    "indent": 缩进,
-                    "params": 参数列表,
-                })
-
-        if not 作用域栈:
-            return set()
-
-        当前作用域 = 作用域栈[-1]
-        局部变量 = set(当前作用域.get("params", []))
-        赋值模式 = re.compile(rf'^\s*({标识符模式})\s*=')
-        遍历模式 = re.compile(rf'^\s*遍历\b.*?\b叫做\s+({标识符模式})\b')
-        重复模式 = re.compile(rf'^\s*重复\b.*?\b次\s+叫做\s+({标识符模式})\b')
-        捕获模式 = re.compile(rf'^\s*如果出错\s+叫做\s+({标识符模式})\b')
-
-        for 行号 in range(当前作用域["line"] + 1, 目标行 + 1):
-            行文本 = 行列表[行号 - 1]
-            去空 = 行文本.strip()
-            if not 去空 or 去空.startswith("#"):
-                continue
-
-            缩进 = self._行首缩进宽度(行文本)
-            if 缩进 <= 当前作用域["indent"]:
-                break
-
-            赋值 = 赋值模式.match(行文本)
-            if 赋值:
-                局部变量.add(赋值.group(1))
-            遍历 = 遍历模式.match(行文本)
-            if 遍历:
-                局部变量.add(遍历.group(1))
-            重复 = 重复模式.match(行文本)
-            if 重复:
-                局部变量.add(重复.group(1))
-            捕获 = 捕获模式.match(行文本)
-            if 捕获:
-                局部变量.add(捕获.group(1))
-
-        return 局部变量
-
-    def _提取引入别名映射(self, 全文):
-        映射 = {}
-        模式 = re.compile(
-            r'^\s*引入\s*["“](.+?)["”]\s*叫做\s*([\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*)',
-            re.MULTILINE,
-        )
-        for 模块名, 别名 in 模式.findall(全文 or ""):
-            模块名 = str(模块名).strip()
-            别名 = str(别名).strip()
-            if 模块名 and 别名:
-                映射[别名] = 模块名
-        return 映射
-
     def _跨标签查别名模块(self, 别名, 当前tab_id=None):
         目标别名 = str(别名 or "").strip()
         if not 目标别名:
@@ -4343,7 +3160,7 @@ class 易码IDE:
                 文本 = 编辑器.get("1.0", "end-1c")
             except tk.TclError:
                 continue
-            映射 = self._提取引入别名映射(文本)
+            映射 = core_extract_import_alias_map(文本)
             if 目标别名 in 映射:
                 return 映射[目标别名]
         return None
@@ -4464,95 +3281,15 @@ class 易码IDE:
         return 签名详情
 
     def _收集补全上下文(self, 全文, tab_id=None, 光标行=None):
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
-        内容 = 全文 or ""
-        局部词 = set(re.findall(r'[\u4e00-\u9fa5A-Za-z0-9_]{2,}', 内容))
-        功能名 = set(re.findall(rf'^\s*功能\s+({标识符模式})', 内容, re.MULTILINE))
-        图纸名 = set(re.findall(rf'^\s*定义图纸\s+({标识符模式})', 内容, re.MULTILINE))
-        变量名 = set(re.findall(rf'^\s*({标识符模式})\s*=', 内容, re.MULTILINE))
-        功能签名, 图纸签名 = self._提取定义签名(内容)
-        当前局部变量 = self._提取当前作用域局部变量(内容, 光标行)
-        引入别名 = self._提取引入别名映射(内容)
-        图纸成员映射, 图纸成员类型映射, 图纸成员签名映射 = self._提取图纸成员映射(内容)
-        对象实例映射 = self._提取对象实例映射(内容)
-        引入模块名 = {str(模块名).strip() for 模块名 in 引入别名.values() if str(模块名).strip()}
-        对象成员历史 = {}
-        for 对象名, 成员名 in re.findall(rf'({标识符模式})\.({标识符模式})', 内容):
-            if not 对象名 or not 成员名:
-                continue
-            对象成员历史.setdefault(对象名, set()).add(成员名)
-
-        别名成员映射 = {}
-        别名成员类型映射 = {}
-        别名成员签名映射 = {}
-        导入导出平铺 = set()
-        导入导出类型 = {}
-        导入导出签名 = {}
-        类型优先级 = {"function": 5, "blueprint": 4, "class": 3, "alias": 2, "variable": 1, "member": 0, "builtin": 0}
-
-        def 合并导入类型(名称, 类型):
-            if not 名称:
-                return
-            当前 = 导入导出类型.get(名称, "member")
-            if 类型优先级.get(类型, 0) >= 类型优先级.get(当前, 0):
-                导入导出类型[名称] = 类型
-
-        def 合并导入签名(名称, 签名):
-            if 名称 and 签名 and not 导入导出签名.get(名称):
-                导入导出签名[名称] = 签名
-
-        for 别名, 模块名 in 引入别名.items():
-            成员详情 = self._获取模块补全成员详情(模块名, tab_id=tab_id)
-            成员签名 = self._获取模块补全成员签名(模块名, tab_id=tab_id)
-            if 成员详情:
-                别名成员类型映射[别名] = dict(成员详情)
-                成员集 = set(成员详情.keys())
-                别名成员映射[别名] = 成员集
-                别名成员签名映射[别名] = dict(成员签名 or {})
-                导入导出平铺.update(成员集)
-                for 成员名, 成员类型 in 成员详情.items():
-                    合并导入类型(成员名, 成员类型)
-                    合并导入签名(成员名, (成员签名 or {}).get(成员名, ""))
-            else:
-                成员集 = self._获取模块补全成员(模块名, tab_id=tab_id)
-                if 成员集:
-                    别名成员映射[别名] = set(成员集)
-                    别名成员签名映射[别名] = dict(成员签名 or {})
-                    导入导出平铺.update(成员集)
-                    for 成员名 in 成员集:
-                        合并导入类型(成员名, "member")
-                        合并导入签名(成员名, (成员签名 or {}).get(成员名, ""))
-
-        for 对象名, 图纸类型名 in 对象实例映射.items():
-            成员集 = set(图纸成员映射.get(图纸类型名, set()))
-            类型表 = dict(图纸成员类型映射.get(图纸类型名, {}))
-            签名表 = dict(图纸成员签名映射.get(图纸类型名, {}))
-            if not 成员集:
-                continue
-            别名成员映射.setdefault(对象名, set()).update(成员集)
-            if 类型表:
-                别名成员类型映射.setdefault(对象名, {}).update(类型表)
-            if 签名表:
-                别名成员签名映射.setdefault(对象名, {}).update(签名表)
-
-        return {
-            "局部词": 局部词,
-            "功能名": 功能名,
-            "图纸名": 图纸名,
-            "变量名": 变量名,
-            "当前局部变量": 当前局部变量,
-            "功能签名": 功能签名,
-            "图纸签名": 图纸签名,
-            "引入别名": 引入别名,
-            "引入模块名": 引入模块名,
-            "别名成员映射": 别名成员映射,
-            "别名成员类型映射": 别名成员类型映射,
-            "别名成员签名映射": 别名成员签名映射,
-            "对象成员历史": 对象成员历史,
-            "导入导出平铺": 导入导出平铺,
-            "导入导出类型": 导入导出类型,
-            "导入导出签名": 导入导出签名,
-        }
+        return core_collect_autocomplete_context(
+            全文,
+            self._格式化参数签名,
+            module_member_details_resolver=lambda 模块名, 当前tab: self._获取模块补全成员详情(模块名, tab_id=当前tab),
+            module_member_signatures_resolver=lambda 模块名, 当前tab: self._获取模块补全成员签名(模块名, tab_id=当前tab),
+            module_members_resolver=lambda 模块名, 当前tab: self._获取模块补全成员(模块名, tab_id=当前tab),
+            tab_id=tab_id,
+            cursor_line=光标行,
+        )
 
     def _展示自动补全候选(self, editor, 排序候选):
         self._autocomplete_items = []
@@ -4714,49 +3451,6 @@ class 易码IDE:
             self.autocomplete_popup.place(x=root_x, y=root_y)
         self.autocomplete_popup.lift()
 
-    def _get_context_snippets(self, editor):
-        """检测光标前的代码块类型，返回上下文相关的 snippet 建议列表。
-        返回格式: set of snippet names that should be boosted."""
-        try:
-            cursor_line = int(editor.index("insert").split(".")[0])
-        except Exception:
-            return set()
-
-        # 上下文关联规则：前面的代码块 → 建议的后续 snippet
-        上下文规则 = {
-            "如果": {"否则如果", "不然"},
-            "否则如果": {"否则如果", "不然"},
-            "尝试": {"如果出错"},
-        }
-
-        # 获取当前行的缩进级别
-        try:
-            当前行文本 = editor.get(f"{cursor_line}.0", f"{cursor_line}.end")
-            当前缩进 = len(当前行文本) - len(当前行文本.lstrip())
-        except Exception:
-            当前缩进 = 0
-
-        # 向上扫描，寻找同级或更低缩进级别的代码块头
-        for i in range(cursor_line - 1, max(0, cursor_line - 30), -1):
-            try:
-                行文本 = editor.get(f"{i}.0", f"{i}.end")
-            except Exception:
-                continue
-            stripped = 行文本.strip()
-            if not stripped:
-                continue
-            行缩进 = len(行文本) - len(行文本.lstrip())
-
-            # 如果遇到同级或更低缩进的代码行
-            if 行缩进 <= 当前缩进:
-                for 关键词, 建议集 in 上下文规则.items():
-                    if stripped.startswith(关键词):
-                        return 建议集
-                # 遇到了同级但不匹配的行，停止搜索
-                break
-
-        return set()
-
     def _check_autocomplete(self, event=None):
         # 排除 Ctrl 组合键（手动触发除外）
         if event and (event.state & 0x4):
@@ -4784,59 +3478,38 @@ class 易码IDE:
             光标行 = int(editor.index("insert").split(".")[0])
         except Exception:
             光标行 = 1
-        标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
         上下文 = self._收集补全上下文(全文, tab_id=tab_id, 光标行=光标行)
         self._update_calltip(editor=editor, tab_id=tab_id, 全文=全文, 行前文本=行前文本, 上下文=上下文)
 
-        点号匹配 = re.search(rf'({标识符模式})\.([\u4e00-\u9fa5A-Za-z0-9_]*)$', 行前文本)
+        点号匹配 = core_extract_member_completion_target(行前文本)
         if 点号匹配:
-            对象名 = 点号匹配.group(1)
-            成员前缀 = 点号匹配.group(2) or ""
-            成员候选集合 = set(上下文["别名成员映射"].get(对象名, set()))
-            成员候选集合.update(上下文.get("对象成员历史", {}).get(对象名, set()))
-            成员类型映射 = dict(上下文.get("别名成员类型映射", {}).get(对象名, {}))
-            成员签名映射 = dict(上下文.get("别名成员签名映射", {}).get(对象名, {}))
+            对象名, 成员前缀 = 点号匹配
+            成员候选集合, 成员类型映射, 成员签名映射 = core_member_completion_seed(上下文, 对象名)
 
             if not 成员候选集合:
                 跨标签模块 = self._跨标签查别名模块(对象名, 当前tab_id=tab_id)
                 if 跨标签模块:
                     跨标签详情 = self._获取模块补全成员详情(跨标签模块, tab_id=tab_id)
                     跨标签签名 = self._获取模块补全成员签名(跨标签模块, tab_id=tab_id)
-                    if 跨标签详情:
-                        成员候选集合.update(跨标签详情.keys())
-                        成员类型映射.update(跨标签详情)
-                        成员签名映射.update(跨标签签名 or {})
-                    else:
-                        成员候选集合.update(self._获取模块补全成员(跨标签模块, tab_id=tab_id))
-                        成员签名映射.update(跨标签签名 or {})
+                    跨标签成员 = set()
+                    if not 跨标签详情:
+                        跨标签成员 = set(self._获取模块补全成员(跨标签模块, tab_id=tab_id))
+                    成员候选集合, 成员类型映射, 成员签名映射 = core_merge_member_completion_fallback(
+                        成员候选集合,
+                        成员类型映射,
+                        成员签名映射,
+                        fallback_details=跨标签详情,
+                        fallback_signatures=跨标签签名,
+                        fallback_members=跨标签成员,
+                    )
 
-            成员候选 = sorted(成员候选集合)
-            if not 成员候选:
-                self._hide_autocomplete()
-                return
-
-            类型到来源 = {
-                "function": "member_func",
-                "blueprint": "member_blueprint",
-                "class": "member_class",
-                "variable": "member_var",
-                "alias": "member_alias",
-            }
-            排名列表 = []
-            for 成员名 in 成员候选:
-                if not self._autocomplete_match(成员名, 成员前缀):
-                    continue
-                基础分 = 0 if (成员前缀 and 成员名.startswith(成员前缀)) else (0.2 if not 成员前缀 else 1.8)
-                成员类型 = 成员类型映射.get(成员名, "member")
-                成员来源 = 类型到来源.get(成员类型, "member")
-                排名列表.append({
-                    "score": 基础分 + len(成员名) / 260.0,
-                    "source": 成员来源,
-                    "insert": 成员名,
-                    "sig": str(成员签名映射.get(成员名, "") or ""),
-                    "callable": 成员类型 in {"function", "class"},
-                })
-
+            排名列表 = core_rank_member_completion_candidates(
+                成员候选集合,
+                成员前缀,
+                成员类型映射,
+                成员签名映射,
+                self._autocomplete_match,
+            )
             if not 排名列表:
                 self._hide_autocomplete()
                 return
@@ -4846,94 +3519,31 @@ class 易码IDE:
             self._展示自动补全候选(editor, self._sort_autocomplete_candidates(排名列表))
             return
 
-        普通匹配 = re.search(rf'({标识符模式})$', 行前文本)
-        if not 普通匹配:
+        当前词 = core_extract_word_completion_prefix(行前文本)
+        if not 当前词:
             self._hide_autocomplete()
             return
 
-        当前词 = 普通匹配.group(1)
-        if len(当前词) < 1:
-            self._hide_autocomplete()
-            return
-
-        功能签名 = 上下文.get("功能签名", {})
-        图纸签名 = 上下文.get("图纸签名", {})
-        导入签名 = 上下文.get("导入导出签名", {})
-        当前局部变量 = 上下文.get("当前局部变量", set()) or set()
-        候选映射 = {}
-
-        def 加候选(词, 来源, 基础分, 签名="", 可调用=False):
-            if not self._autocomplete_match(词, 当前词):
-                return
-            分数 = 基础分
-            if 词 == 当前词:
-                分数 -= 1.1
-            elif 词.startswith(当前词):
-                分数 -= 0.4
-            分数 += len(词) / 260.0
-            旧 = 候选映射.get(词)
-            新项 = {
-                "score": 分数,
-                "source": 来源,
-                "insert": 词,
-                "sig": str(签名 or ""),
-                "callable": bool(可调用),
-            }
-            if 旧 is None or 分数 < 旧["score"]:
-                候选映射[词] = 新项
-            elif 旧 is not None:
-                if (not 旧.get("sig")) and 新项.get("sig"):
-                    旧["sig"] = 新项["sig"]
-                if 新项.get("callable") and not 旧.get("callable"):
-                    旧["callable"] = True
-
-        上下文建议 = self._get_context_snippets(editor)
-
-        for 词 in self.autocomplete_words:
-            if 词 in self.snippets:
-                # 上下文相关的 snippet 排在最前面
-                分数 = -1.5 if 词 in 上下文建议 else -0.2
-                加候选(词, "snippet", 分数, 可调用=False)
-            elif 词 in self.builtin_words:
-                加候选(词, "builtin_func", 0.08, 签名=self._builtin_signature_of(词), 可调用=True)
-            else:
-                # 上下文相关的关键词也排在前面（如 尝试 后面的 如果出错）
-                分数 = -1.5 if 词 in 上下文建议 else 0.26
-                加候选(词, "keyword", 分数, 可调用=False)
-
-        for 词 in 上下文["功能名"]:
-            加候选(词, "function", 0.05, 签名=功能签名.get(词, "()"), 可调用=True)
-        for 词 in 上下文["图纸名"]:
-            加候选(词, "blueprint", 0.09, 签名=图纸签名.get(词, "()"), 可调用=False)
-        for 词 in 上下文["变量名"]:
-            权重 = 0.02 if 词 in 当前局部变量 else 0.35
-            加候选(词, "variable", 权重, 可调用=False)
-        for 词 in 上下文["引入别名"].keys():
-            加候选(词, "alias", 0.12, 可调用=False)
-        for 词 in 上下文.get("引入模块名", set()):
-            加候选(词, "module", 0.22, 可调用=False)
-        导入类型 = 上下文.get("导入导出类型", {})
-        导入类型到来源 = {
-            "function": "imported_func",
-            "blueprint": "imported_blueprint",
-            "class": "imported_class",
-            "variable": "imported_var",
-            "alias": "imported_alias",
-        }
-        for 词 in 上下文["导入导出平铺"]:
-            词类型 = 导入类型.get(词, "member")
-            来源 = 导入类型到来源.get(词类型, "imported")
-            可调用 = 词类型 in {"function", "class"}
-            加候选(词, 来源, 0.46, 签名=导入签名.get(词, ""), 可调用=可调用)
+        上下文建议 = core_collect_context_snippet_hints(全文, 光标行)
+        排名列表 = core_rank_word_completion_candidates(
+            当前词,
+            上下文,
+            self.autocomplete_words,
+            self.snippets,
+            self.builtin_words,
+            self._builtin_signature_of,
+            self._autocomplete_match,
+            context_snippets=上下文建议,
+        )
         # 关闭“上下文自由词”补全：避免把注释/随手文本当成候选，确保补全结果更真实可用。
 
-        if not 候选映射:
+        if not 排名列表:
             self._hide_autocomplete()
             return
 
         self._autocomplete_replace_start = f"insert - {len(当前词)}c"
         self._autocomplete_replace_end = "insert"
-        排序后 = self._sort_autocomplete_candidates(候选映射.values())
+        排序后 = self._sort_autocomplete_candidates(排名列表)
         self._展示自动补全候选(editor, 排序后)
 
     def _handle_autocomplete_nav(self, event):
@@ -5029,9 +3639,9 @@ class 易码IDE:
             if selected_callable or (selected_source in 自动补括号来源):
                 前瞻文本 = editor.get(末尾位置, f"{末尾位置}+6c")
                 if not re.match(r'^\s*[\(（]', 前瞻文本 or ""):
-                    调用片段 = self._标准化补全签名(selected_sig)
+                    调用片段 = core_normalize_completion_signature(selected_sig)
                     editor.insert(末尾位置, 调用片段)
-                    占位偏移 = self._补全首参数区间偏移(调用片段)
+                    占位偏移 = core_first_argument_span_offset(调用片段)
                     if 占位偏移:
                         起偏移, 止偏移 = 占位偏移
                         sel_start = editor.index(f"{末尾位置}+{起偏移}c")
@@ -5593,7 +4203,7 @@ class 易码IDE:
         #    - 模块别名对象（来自 引入 ... 叫做 ...）用 ModuleAlias
         #    - 其他对象名用 ObjectRef
         #    - 点后的成员名统一用 MemberName
-        别名集合 = set(self._提取引入别名映射(code).keys())
+        别名集合 = set(core_extract_import_alias_map(code).keys())
         标识符模式 = r'[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]*'
 
         def 在字符串或注释内(索引):
@@ -6611,92 +5221,10 @@ class 易码IDE:
             self._switch_project(dir_path, preferred_file=os.path.join(dir_path, "主程序.ym"), create_blank_if_empty=True)
 
     def _sanitize_export_name(self, 名称):
-        结果 = str(名称 or "").strip()
-        if not 结果:
-            结果 = "易码生成软件"
-        for 坏字符 in '<>:"/\\|?*':
-            结果 = 结果.replace(坏字符, "_")
-        结果 = 结果.strip(" .")
-        return 结果 if 结果 else "易码生成软件"
-
-    def _目录在工作区内(self, 目录):
-        try:
-            工作区 = os.path.abspath(self.workspace_dir or "")
-            目标 = os.path.abspath(目录 or "")
-            if not 工作区 or not 目标:
-                return False
-            return os.path.commonpath([工作区, 目标]) == 工作区
-        except Exception:
-            return False
-
-    def _就近主程序入口(self, 当前文件路径):
-        """
-        从当前文件所在目录向上查找最近的主程序.ym（不越过工作区）。
-        返回 (入口路径, 项目目录)；找不到则返回 (None, None)。
-        """
-        if not 当前文件路径:
-            return (None, None)
-        try:
-            当前目录 = os.path.dirname(os.path.abspath(当前文件路径))
-        except Exception:
-            return (None, None)
-
-        while True:
-            if not self._目录在工作区内(当前目录):
-                break
-            候选入口 = os.path.join(当前目录, "主程序.ym")
-            if os.path.isfile(候选入口):
-                return (os.path.abspath(候选入口), 当前目录)
-            上级目录 = os.path.dirname(当前目录)
-            if 上级目录 == 当前目录:
-                break
-            当前目录 = 上级目录
-        return (None, None)
+        return core_sanitize_export_name(名称)
 
     def _解析导出入口(self, 当前文件路径):
-        """
-        解析导出入口，避免总是落到工作区根目录主程序。
-        规则：
-        1) 当前文件就是主程序.ym：直接作为入口；
-        2) 否则向上查找最近主程序.ym：作为该子项目入口；
-        3) 都找不到时，使用当前文件本身；
-        4) 若当前文件不可用，再回退到工作区根主程序.ym。
-        返回：(源码入口, 源码目录, 软件名称原始)
-        """
-        当前绝对 = None
-        if 当前文件路径 and 当前文件路径 != "未命名代码.ym" and os.path.isfile(当前文件路径):
-            当前绝对 = os.path.abspath(当前文件路径)
-
-        if 当前绝对:
-            if os.path.basename(当前绝对) == "主程序.ym":
-                项目目录 = os.path.dirname(当前绝对)
-                软件名 = os.path.basename(os.path.abspath(项目目录)) or "易码生成软件"
-                return (当前绝对, 项目目录, 软件名)
-
-            就近入口, 项目目录 = self._就近主程序入口(当前绝对)
-            if 就近入口 and 项目目录:
-                # 若只命中“工作区根主程序”，通常是全局工程入口。
-                # 当前文件不在该入口目录时，默认按单文件导出，避免示例文件被错误打成根工程。
-                工作区根 = os.path.normcase(os.path.abspath(self.workspace_dir or ""))
-                项目目录绝对 = os.path.normcase(os.path.abspath(项目目录))
-                当前文件目录绝对 = os.path.normcase(os.path.dirname(当前绝对))
-                if 项目目录绝对 == 工作区根 and 当前文件目录绝对 != 项目目录绝对:
-                    pass
-                else:
-                    软件名 = os.path.basename(os.path.abspath(项目目录)) or "易码生成软件"
-                    return (就近入口, 项目目录, 软件名)
-
-            # 没有主程序时，按单文件导出
-            单文件目录 = os.path.dirname(当前绝对)
-            软件名 = os.path.splitext(os.path.basename(当前绝对))[0] or "易码生成软件"
-            return (当前绝对, 单文件目录, 软件名)
-
-        工作区入口 = os.path.join(self.workspace_dir, "主程序.ym")
-        if os.path.isfile(工作区入口):
-            软件名 = os.path.basename(os.path.abspath(self.workspace_dir)) or "易码生成软件"
-            return (工作区入口, self.workspace_dir, 软件名)
-
-        return (None, self.workspace_dir, "易码生成软件")
+        return core_resolve_export_entry(当前文件路径, self.workspace_dir)
 
     def export_exe(self):
         editor = self._get_current_editor()
@@ -6718,376 +5246,42 @@ class 易码IDE:
 
         源码入口, 源码目录, 软件名称原始 = self._解析导出入口(当前文件路径)
 
-        默认图标 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.ico")
-        默认软件名 = self._sanitize_export_name(软件名称原始)
-        默认输出目录 = os.path.join(源码目录 or self.workspace_dir, "易码_成品软件")
-        默认输出路径 = os.path.join(默认输出目录, f"{默认软件名}.exe")
-        默认图标路径 = 默认图标 if os.path.isfile(默认图标) else ""
+        默认值 = core_build_export_defaults(
+            workspace_dir=self.workspace_dir,
+            source_dir=源码目录,
+            raw_app_name=软件名称原始,
+            tool_root_dir=os.path.dirname(os.path.abspath(__file__)),
+        )
+        默认软件名 = 默认值["软件名称"]
+        默认输出路径 = 默认值["输出路径"]
+        默认图标路径 = 默认值["图标路径"]
 
-        def 选择导出模式():
-            模式窗口 = tk.Toplevel(self.root)
-            模式窗口.title("导出模式")
-            模式窗口.configure(bg=self.theme_toolbar_bg)
-            模式窗口.resizable(False, False)
-            模式窗口.transient(self.root)
-            模式窗口.grab_set()
-            标题字体 = getattr(self, "font_ui_bold", self.font_ui)
-
-            结果容器 = {"值": None}
-
-            def 设定模式(值):
-                结果容器["值"] = 值
-                模式窗口.destroy()
-
-            主框 = tk.Frame(模式窗口, bg=self.theme_toolbar_bg, padx=16, pady=14)
-            主框.pack(fill=tk.BOTH, expand=True)
-
-            tk.Label(
-                主框,
-                text="请选择导出方式：",
-                bg=self.theme_toolbar_bg,
-                fg=self.theme_toolbar_fg,
-                font=标题字体,
-                anchor="w",
-            ).pack(anchor="w")
-            tk.Label(
-                主框,
-                text="快速版：一键打包（推荐）\n高级版：自定义名称/路径/图标/运行模式",
-                bg=self.theme_toolbar_bg,
-                fg=self.theme_toolbar_fg,
-                font=self.font_ui,
-                justify="left",
-                anchor="w",
-                pady=8,
-            ).pack(anchor="w", fill=tk.X)
-
-            按钮框 = tk.Frame(主框, bg=self.theme_toolbar_bg)
-            按钮框.pack(fill=tk.X, pady=(8, 0))
-
-            tk.Button(
-                按钮框,
-                text="快速版",
-                command=lambda: 设定模式("quick"),
-                font=self.font_ui,
-                width=10,
-                bg="#1E7BC8",
-                fg="#FFFFFF",
-            ).pack(side=tk.LEFT)
-            tk.Button(
-                按钮框,
-                text="高级版",
-                command=lambda: 设定模式("advanced"),
-                font=self.font_ui,
-                width=10,
-            ).pack(side=tk.LEFT, padx=(8, 0))
-            tk.Button(
-                按钮框,
-                text="取消",
-                command=lambda: 设定模式(None),
-                font=self.font_ui,
-                width=10,
-            ).pack(side=tk.RIGHT)
-
-            模式窗口.bind("<Escape>", lambda e: 设定模式(None))
-            模式窗口.bind("<Return>", lambda e: 设定模式("quick"))
-
-            self.root.update_idletasks()
-            模式窗口.update_idletasks()
-            宽 = max(560, 主框.winfo_reqwidth() + 24)
-            高 = max(220, 主框.winfo_reqheight() + 24)
-            x = self.root.winfo_rootx() + max(20, (self.root.winfo_width() - 宽) // 2)
-            y = self.root.winfo_rooty() + max(20, (self.root.winfo_height() - 高) // 2)
-            模式窗口.geometry(f"{宽}x{高}+{x}+{y}")
-            self.root.wait_window(模式窗口)
-            return 结果容器["值"]
-
-        导出模式 = 选择导出模式()
+        导出模式 = ui_choose_export_mode_dialog(self)
         if 导出模式 is None:
             return
 
         打包配置 = None
 
         if 导出模式 == "quick":
-            打包配置 = {
-                "软件名称": 默认软件名,
-                "输出路径": 默认输出路径,
-                "图标路径": 默认图标路径 or None,
-                "隐藏黑框": True,
-                "模式文本": "纯净窗口版（不显示黑框）",
-                "模式标题": "一键打包",
-            }
+            打包配置 = core_build_quick_export_config(默认软件名, 默认输出路径, 默认图标路径)
         elif 导出模式 == "advanced":
-            高级窗口 = tk.Toplevel(self.root)
-            高级窗口.title("导出软件（高级设置）")
-            高级窗口.configure(bg=self.theme_toolbar_bg)
-            高级窗口.resizable(False, False)
-            高级窗口.transient(self.root)
-            高级窗口.grab_set()
-
-            名称变量 = tk.StringVar(value=默认软件名)
-            路径变量 = tk.StringVar(value=默认输出路径)
-            图标变量 = tk.StringVar(value=默认图标路径)
-            模式变量 = tk.StringVar(value="windowed")
-            结果容器 = {"值": None}
-            默认软件文件名 = f"{默认软件名}.exe"
-
-            主框 = tk.Frame(高级窗口, bg=self.theme_toolbar_bg, padx=14, pady=12)
-            主框.pack(fill=tk.BOTH, expand=True)
-
-            标签样式 = {"bg": self.theme_toolbar_bg, "fg": self.theme_toolbar_fg, "font": self.font_ui}
-            输入样式 = {"font": self.font_ui, "bg": self.theme_bg, "fg": self.theme_fg, "insertbackground": self.theme_fg}
-
-            tk.Label(主框, text="软件名称：", **标签样式).grid(row=0, column=0, sticky="w", pady=(0, 6))
-            名称输入 = tk.Entry(主框, textvariable=名称变量, width=48, **输入样式)
-            名称输入.grid(row=0, column=1, columnspan=2, sticky="we", padx=(8, 0), pady=(0, 6))
-
-            tk.Label(主框, text="输出路径：", **标签样式).grid(row=1, column=0, sticky="w", pady=6)
-            路径输入 = tk.Entry(主框, textvariable=路径变量, width=48, **输入样式)
-            路径输入.grid(row=1, column=1, sticky="we", padx=(8, 8), pady=6)
-
-            tk.Label(主框, text="图标文件：", **标签样式).grid(row=2, column=0, sticky="w", pady=6)
-            图标输入 = tk.Entry(主框, textvariable=图标变量, width=48, **输入样式)
-            图标输入.grid(row=2, column=1, sticky="we", padx=(8, 8), pady=6)
-
-            tk.Label(主框, text="运行模式：", **标签样式).grid(row=3, column=0, sticky="nw", pady=(8, 2))
-            模式框 = tk.Frame(主框, bg=self.theme_toolbar_bg)
-            模式框.grid(row=3, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 2))
-
-            tk.Radiobutton(
-                模式框,
-                text="代码黑框版（调试）",
-                variable=模式变量,
-                value="console",
-                bg=self.theme_toolbar_bg,
-                fg=self.theme_toolbar_fg,
-                selectcolor=self.theme_panel_bg,
-                activebackground=self.theme_toolbar_bg,
-                activeforeground=self.theme_toolbar_fg,
-                font=self.font_ui,
-            ).pack(anchor="w")
-            tk.Radiobutton(
-                模式框,
-                text="纯净窗口版（发布）",
-                variable=模式变量,
-                value="windowed",
-                bg=self.theme_toolbar_bg,
-                fg=self.theme_toolbar_fg,
-                selectcolor=self.theme_panel_bg,
-                activebackground=self.theme_toolbar_bg,
-                activeforeground=self.theme_toolbar_fg,
-                font=self.font_ui,
-            ).pack(anchor="w")
-
-            提示文字 = tk.Label(
-                主框,
-                text="说明：可直接手动改路径；图标留空会使用默认 logo.ico（如存在）。",
-                bg=self.theme_toolbar_bg,
-                fg=self.theme_toolbar_muted,
-                font=self.font_ui,
-                anchor="w",
-            )
-            提示文字.grid(row=4, column=0, columnspan=3, sticky="we", pady=(8, 10))
-
-            按钮框 = tk.Frame(主框, bg=self.theme_toolbar_bg)
-            按钮框.grid(row=5, column=0, columnspan=3, sticky="e")
-
-            def 选择输出路径():
-                当前路径值 = 路径变量.get().strip()
-                初始目录 = self.workspace_dir
-                初始文件 = f"{self._sanitize_export_name(名称变量.get())}.exe"
-                if 当前路径值:
-                    当前路径值 = os.path.abspath(os.path.expanduser(当前路径值))
-                    if os.path.isdir(os.path.dirname(当前路径值)):
-                        初始目录 = os.path.dirname(当前路径值)
-                    基础名 = os.path.basename(当前路径值)
-                    if 基础名:
-                        初始文件 = 基础名
-                选择结果 = filedialog.asksaveasfilename(
-                    title="选择导出 EXE 路径",
-                    parent=高级窗口,
-                    initialdir=初始目录,
-                    initialfile=初始文件,
-                    defaultextension=".exe",
-                    filetypes=[("Windows 可执行文件", "*.exe"), ("所有文件", "*.*")],
-                )
-                if 选择结果:
-                    路径变量.set(选择结果)
-
-            def 选择图标():
-                当前图标值 = 图标变量.get().strip()
-                初始目录 = self.workspace_dir
-                if 当前图标值 and os.path.isdir(os.path.dirname(os.path.abspath(os.path.expanduser(当前图标值)))):
-                    初始目录 = os.path.dirname(os.path.abspath(os.path.expanduser(当前图标值)))
-                选择结果 = filedialog.askopenfilename(
-                    title="选择图标文件（.ico）",
-                    parent=高级窗口,
-                    initialdir=初始目录,
-                    filetypes=[("图标文件", "*.ico"), ("所有文件", "*.*")],
-                )
-                if 选择结果:
-                    图标变量.set(选择结果)
-
-            def 取消高级():
-                高级窗口.destroy()
-
-            def 确认高级():
-                软件名 = self._sanitize_export_name(名称变量.get())
-                输出路径 = str(路径变量.get() or "").strip()
-                if not 输出路径:
-                    输出路径 = os.path.join(默认输出目录, f"{软件名}.exe")
-                else:
-                    输出路径 = os.path.abspath(os.path.expanduser(输出路径))
-                    # 允许用户直接填目录，此时自动补成“目录/软件名.exe”
-                    if os.path.isdir(输出路径) or 输出路径.endswith(("\\", "/")):
-                        输出路径 = os.path.join(输出路径, f"{软件名}.exe")
-                    # 输入的是无后缀文件名时，补齐 .exe
-                    if not 输出路径.lower().endswith(".exe"):
-                        输出路径 += ".exe"
-
-                    # 关键修复：若当前仍是默认文件名，则跟随“软件名称”自动改名
-                    当前文件名 = os.path.basename(输出路径)
-                    if 当前文件名.lower() == 默认软件文件名.lower():
-                        输出目录 = os.path.dirname(输出路径) or 默认输出目录
-                        输出路径 = os.path.join(输出目录, f"{软件名}.exe")
-
-                图标值 = str(图标变量.get() or "").strip()
-                图标值 = os.path.abspath(os.path.expanduser(图标值)) if 图标值 else None
-                if 图标值 and not os.path.isfile(图标值):
-                    messagebox.showwarning("图标无效", "图标文件不存在，请重新选择。", parent=高级窗口)
-                    return
-
-                隐藏黑框 = 模式变量.get() == "windowed"
-                模式文本 = "纯净窗口版（不显示黑框）" if 隐藏黑框 else "代码黑框版（带日志窗口）"
-                结果容器["值"] = {
-                    "软件名称": 软件名,
-                    "输出路径": 输出路径,
-                    "图标路径": 图标值,
-                    "隐藏黑框": 隐藏黑框,
-                    "模式文本": 模式文本,
-                    "模式标题": "高级导出",
-                }
-                高级窗口.destroy()
-
-            浏览输出按钮 = tk.Button(主框, text="浏览...", command=选择输出路径, font=self.font_ui, width=10)
-            浏览输出按钮.grid(row=1, column=2, sticky="e", pady=6)
-            浏览图标按钮 = tk.Button(主框, text="浏览...", command=选择图标, font=self.font_ui, width=10)
-            浏览图标按钮.grid(row=2, column=2, sticky="e", pady=6)
-
-            tk.Button(按钮框, text="取消", command=取消高级, font=self.font_ui, width=10).pack(side=tk.RIGHT, padx=(8, 0))
-            tk.Button(按钮框, text="开始打包", command=确认高级, font=self.font_ui, width=12, bg="#1E7BC8", fg="#FFFFFF").pack(side=tk.RIGHT)
-
-            主框.grid_columnconfigure(1, weight=1)
-            名称输入.focus_set()
-            高级窗口.bind("<Return>", lambda e: 确认高级())
-            高级窗口.bind("<Escape>", lambda e: 取消高级())
-
-            self.root.update_idletasks()
-            高级窗口.update_idletasks()
-            宽 = max(860, 主框.winfo_reqwidth() + 28)
-            高 = max(420, 主框.winfo_reqheight() + 28)
-            x = self.root.winfo_rootx() + max(20, (self.root.winfo_width() - 宽) // 2)
-            y = self.root.winfo_rooty() + max(20, (self.root.winfo_height() - 高) // 2)
-            高级窗口.geometry(f"{宽}x{高}+{x}+{y}")
-            self.root.wait_window(高级窗口)
-            打包配置 = 结果容器["值"]
+            打包配置 = ui_advanced_export_config_dialog(self, 默认值, core_build_advanced_export_config)
 
         if not 打包配置:
             return
 
-        输出路径 = os.path.abspath(os.path.expanduser(打包配置["输出路径"]))
-        错误列表, 警告列表 = self._导出前置检查(源码入口, 打包配置, 输出路径)
-        if 错误列表:
-            错误文本 = "\n".join(f"{i}. {msg}" for i, msg in enumerate(错误列表, 1))
-            messagebox.showerror("无法开始打包", f"导出前检查未通过：\n\n{错误文本}", parent=self.root)
-            return
-        if 警告列表:
-            警告文本 = "\n".join(f"{i}. {msg}" for i, msg in enumerate(警告列表, 1))
-            if not messagebox.askyesno("导出前提醒", f"发现以下风险：\n\n{警告文本}\n\n是否继续打包？", parent=self.root):
-                return
-        if os.path.exists(输出路径):
-            if not messagebox.askyesno("确认覆盖", f"目标文件已存在：\n{输出路径}\n\n是否覆盖？", parent=self.root):
-                return
-
-        提示文本 = (
-            f"模式：{打包配置['模式标题']}\n"
-            + f"入口：{os.path.basename(源码入口) if 源码入口 else '当前编辑内容'}\n"
-            + f"软件名：{打包配置['软件名称']}\n"
-            + f"输出路径：{输出路径}\n"
-            + f"图标：{打包配置['图标路径'] if 打包配置['图标路径'] else '默认 logo.ico（如存在）'}\n"
-            + f"运行模式：{打包配置['模式文本']}\n\n"
-            + "确认开始打包吗？"
+        输出路径 = ui_export_precheck_and_confirm(
+            self,
+            源码入口,
+            打包配置,
+            preflight_checker=self._导出前置检查,
+            format_numbered_messages_func=core_format_numbered_messages,
+            build_confirmation_text_func=core_build_export_confirmation_text,
         )
-        if not messagebox.askyesno("确认导出", 提示文本, parent=self.root):
+        if not 输出路径:
             return
 
-        self._clear_output_console(keep_intro=True)
-        self.print_output(
-            "=============================\n"
-            + f"开始打包 EXE（{打包配置['模式标题']}）\n"
-            + "============================="
-        )
-
-        import threading
-        import tempfile
-
-        def 打印进度(文字):
-            文本 = str(文字 or "")
-            # 打包工具内部会先打印一次“中间产物”成功路径，最终路径由编辑器统一打印，避免重复误导。
-            if 文本.startswith("打包成功："):
-                return
-            self.root.after(0, lambda t=文本: self.print_output(t))
-
-        def 后台打包():
-            原始目录 = os.getcwd()
-            临时入口 = None
-            try:
-                if not 源码入口:
-                    临时目录 = tempfile.gettempdir()
-                    临时入口 = os.path.join(临时目录, "_易码源码编译缓冲.ym")
-                    with open(临时入口, "w", encoding="utf-8") as f:
-                        f.write(源码内容)
-                    打包入口 = 临时入口
-                else:
-                    打包入口 = 源码入口
-
-                os.chdir(源码目录 or self.workspace_dir)
-                from 易码打包工具 import 编译并打包
-
-                最终路径 = 编译并打包(
-                    打包入口,
-                    图标路径=打包配置["图标路径"],
-                    隐藏黑框=打包配置["隐藏黑框"],
-                    进度打字机=打印进度,
-                    软件名称=打包配置["软件名称"],
-                    源码目录=源码目录 or self.workspace_dir,
-                )
-                最终绝对路径 = os.path.abspath(最终路径)
-                目标绝对路径 = os.path.abspath(输出路径)
-
-                if os.path.normcase(最终绝对路径) != os.path.normcase(目标绝对路径):
-                    os.makedirs(os.path.dirname(目标绝对路径), exist_ok=True)
-                    if os.path.exists(目标绝对路径):
-                        os.remove(目标绝对路径)
-                    shutil.move(最终绝对路径, 目标绝对路径)
-                    最终绝对路径 = 目标绝对路径
-
-                self.root.after(0, lambda p=最终绝对路径: self.print_output(f"打包成功：{p}"))
-                self.root.after(0, lambda p=最终绝对路径: messagebox.showinfo("打包完成", f"可执行文件已生成：\n{p}"))
-            except Exception as e:
-                self.root.after(0, lambda msg=str(e): messagebox.showerror("打包失败", msg))
-            finally:
-                try:
-                    os.chdir(原始目录)
-                except Exception:
-                    pass
-                if 临时入口 and os.path.isfile(临时入口):
-                    try:
-                        os.remove(临时入口)
-                    except Exception:
-                        pass
-
-        t = threading.Thread(target=后台打包, daemon=True)
-        t.start()
+        ui_start_export_packaging_task(self, 源码内容, 源码入口, 源码目录, 打包配置, 输出路径)
 if __name__ == "__main__":
     # 必须在初始化 Tk 之前宣告 DPI 感知，否则即使点数(pt)字体缩放了，Tkinter本身也会按照低分屏映射引发排版错乱
     try:

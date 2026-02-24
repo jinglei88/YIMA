@@ -179,6 +179,23 @@ python scripts/run_error_regression.py
 python scripts/run_editor_logic_regression.py
 ```
 
+仅验证打包核心链路（依赖图/清单/语法预检）：
+
+```bash
+python scripts/run_packaging_regression.py
+```
+
+CI 自动托管回归：
+
+- 仓库内置 GitHub Actions 工作流：`.github/workflows/ci.yml`
+- 在 `push / pull_request / workflow_dispatch` 时自动执行：
+  - `scripts/run_regression.py`
+  - `scripts/run_docs_regression.py`
+  - `scripts/run_v1_contract_regression.py`
+- 发布前手动工作流：`.github/workflows/release-regression.yml`
+  - `workflow_dispatch` 触发
+  - 支持 `skip_pack=true/false`（是否跳过打包冒烟）
+
 ## 打包清单（可选）
 
 项目根目录可放 `易码打包清单.json`（或 `yima_pack.json`）补充打包信息：

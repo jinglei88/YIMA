@@ -88,12 +88,6 @@ class 引入语句节点(AST节点):
         self.别名 = 别名
         self.行号 = 行号
 
-class 精确引入语句节点(AST节点):
-    def __init__(self, 模块名, 功能名, 行号):
-        self.模块名 = 模块名
-        self.功能名 = 功能名
-        self.行号 = 行号
-
 class 显示语句节点(AST节点):
     def __init__(self, 表达式):
         self.表达式 = 表达式
