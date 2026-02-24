@@ -845,6 +845,11 @@ def mark_feedback_tab(owner, tab_key, active=True):
         unread[tab_key] = False
         refresh_feedback_tab_badges(owner)
         return
+    # 当前就在该页签时视为“已读”，不产生红点。
+    if _feedback_selected_key(owner) == tab_key:
+        unread[tab_key] = False
+        refresh_feedback_tab_badges(owner)
+        return
     unread[tab_key] = True
     refresh_feedback_tab_badges(owner)
 

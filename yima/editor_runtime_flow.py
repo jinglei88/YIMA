@@ -26,7 +26,7 @@ class UserCancelledInput(Exception):
     """Raised when user cancels interactive input dialog."""
 
 
-def print_output(owner, text, is_error=False):
+def print_output(owner, text, is_error=False, notify=True):
     try:
         owner.output.config(state=tk.NORMAL)
         content = str(text or "")
@@ -36,18 +36,19 @@ def print_output(owner, text, is_error=False):
             owner.output.insert(tk.END, content + "\n")
         owner.output.see(tk.END)
         owner.output.config(state=tk.DISABLED)
-        if hasattr(owner, "_mark_feedback_tab"):
+        if notify and hasattr(owner, "_mark_feedback_tab"):
             owner._mark_feedback_tab("console", active=True)
     except tk.TclError:
         pass
 
 
 def write_output_console_intro(owner):
-    print_output(owner, "========================================")
-    print_output(owner, "【易码调试控制台】")
-    print_output(owner, "作者：景磊")
-    print_output(owner, "联系 QQ：95842972 / 97777315")
-    print_output(owner, "========================================")
+    # 启动时的控制台欢迎文案不计为“未读消息”，避免默认红点。
+    print_output(owner, "========================================", notify=False)
+    print_output(owner, "【易码调试控制台】", notify=False)
+    print_output(owner, "作者：景磊", notify=False)
+    print_output(owner, "联系 QQ：95842972 / 97777315", notify=False)
+    print_output(owner, "========================================", notify=False)
 
 
 def clear_output_console(owner, keep_intro=True):

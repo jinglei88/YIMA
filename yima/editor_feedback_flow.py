@@ -266,9 +266,7 @@ def refresh_quick_view(owner, event=None):
     new_text = build_quick_view_text(owner, tab_id, editor)
     set_quick_view_text(owner, new_text)
     owner._quick_view_last_text = str(new_text)
-    if str(new_text) != prev_text and prev_text.strip():
-        if hasattr(owner, "_mark_feedback_tab"):
-            owner._mark_feedback_tab("quick", active=True)
+    # 快速查看属于“实时上下文”，不使用未读红点提示，避免默认状态噪声。
 
 
 def refresh_issue_list(owner):
