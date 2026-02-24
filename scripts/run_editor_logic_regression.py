@@ -56,6 +56,7 @@ from yima.editor_project_flow import (
     load_project_state as flow_load_project_state,
     restore_project_open_tabs as flow_restore_project_open_tabs,
     save_project_state as flow_save_project_state,
+    try_restore_last_project as flow_try_restore_last_project,
 )
 
 
@@ -745,6 +746,82 @@ def check_project_session_state_rules() -> None:
             self._selected = tab_id
             return self._selected
 
+    class EditorStub:
+        def __init__(self, cursor="1.0", yview=0.0, xview=0.0, text=""):
+            self._cursor = str(cursor)
+            try:
+                y = float(yview)
+            except Exception:
+                y = 0.0
+            self._yview = max(0.0, min(1.0, y))
+            try:
+                x = float(xview)
+            except Exception:
+                x = 0.0
+            self._xview = max(0.0, min(1.0, x))
+            raw_lines = str(text or "").splitlines()
+            self._lines = raw_lines if raw_lines else [""]
+            self._tags = {}
+
+        def index(self, name):
+            if name == "insert":
+                return self._cursor
+            if name == "end-1c":
+                line_no = len(self._lines)
+                col_no = len(self._lines[-1]) if self._lines else 0
+                return f"{line_no}.{col_no}"
+            return str(name)
+
+        def mark_set(self, name, index):
+            if name == "insert":
+                self._cursor = str(index)
+
+        def yview(self):
+            return (self._yview, min(1.0, self._yview + 0.25))
+
+        def yview_moveto(self, fraction):
+            try:
+                y = float(fraction)
+            except Exception:
+                return
+            self._yview = max(0.0, min(1.0, y))
+
+        def xview(self):
+            return (self._xview, min(1.0, self._xview + 0.25))
+
+        def xview_moveto(self, fraction):
+            try:
+                x = float(fraction)
+            except Exception:
+                return
+            self._xview = max(0.0, min(1.0, x))
+
+        def _line_of(self, index):
+            text = str(index or "1.0")
+            line_part = text.split(".", 1)[0]
+            try:
+                line_no = int(line_part)
+            except Exception:
+                line_no = 1
+            return max(1, min(len(self._lines), line_no))
+
+        def get(self, start, end=None):
+            del end
+            return self._lines[self._line_of(start) - 1]
+
+        def tag_configure(self, tag_name, **kwargs):
+            tag_data = self._tags.setdefault(str(tag_name), {"ranges": []})
+            if "elide" in kwargs:
+                tag_data["elide"] = bool(kwargs["elide"])
+
+        def tag_remove(self, tag_name, _start, _end):
+            tag_data = self._tags.setdefault(str(tag_name), {"ranges": []})
+            tag_data["ranges"] = []
+
+        def tag_add(self, tag_name, start, end):
+            tag_data = self._tags.setdefault(str(tag_name), {"ranges": []})
+            tag_data["ranges"] = [(str(start), str(end))]
+
     class OwnerStub:
         pass
 
@@ -755,11 +832,14 @@ def check_project_session_state_rules() -> None:
         file_a = project / "a.ym"
         file_b = project / "b.ym"
         file_c = project / "c.ym"
-        file_a.write_text('?? "A"\n', encoding="utf-8")
-        file_b.write_text('?? "B"\n', encoding="utf-8")
-        file_c.write_text('?? "C"\n', encoding="utf-8")
+        file_a.write_text("A\n    A1\n    A2\n", encoding="utf-8")
+        file_b.write_text("B\n    B1\n", encoding="utf-8")
+        file_c.write_text("C\n    C1\n", encoding="utf-8")
 
-        def new_owner():
+        def normcase(path):
+            return os.path.normcase(str(Path(path).resolve()))
+
+        def new_owner(initial_views=None, initial_folds=None):
             owner = OwnerStub()
             owner._state_dir = str(root / ".state")
             owner._state_file = str(Path(owner._state_dir) / "editor_state.json")
@@ -768,10 +848,42 @@ def check_project_session_state_rules() -> None:
             owner.last_project_dir = None
             owner.last_open_file = None
             owner.last_session_files = []
+            owner.last_session_views = {}
+            owner.last_session_folds = {}
+            owner.last_session_outline_focus = {}
             owner.tabs_data = {}
             owner.notebook = NotebookStub()
             owner.print_output = lambda *_args, **_kwargs: None
+            owner.refresh_file_tree = lambda: None
+            owner._refresh_outline = lambda: None
+            owner._update_line_numbers = lambda *_args, **_kwargs: None
             owner._normalize_file_path = lambda p: str(Path(p).resolve()) if Path(p).is_file() else None
+            owner._initial_views = {
+                normcase(p): dict(v)
+                for p, v in (initial_views or {}).items()
+                if isinstance(v, dict)
+            }
+            owner._initial_folds = {
+                normcase(p): [int(x) for x in lines]
+                for p, lines in (initial_folds or {}).items()
+                if isinstance(lines, (list, tuple, set))
+            }
+            class _StatusVar:
+                def __init__(self):
+                    self.value = ""
+                def set(self, text):
+                    self.value = str(text)
+            class _TextVar:
+                def __init__(self, value=""):
+                    self.value = str(value)
+                def get(self):
+                    return self.value
+                def set(self, value):
+                    self.value = str(value)
+
+            owner.status_main_var = _StatusVar()
+            owner.find_var = _TextVar("")
+            owner.replace_var = _TextVar("")
 
             def _get_current_tab_id():
                 return owner.notebook.select()
@@ -779,23 +891,80 @@ def check_project_session_state_rules() -> None:
             owner._get_current_tab_id = _get_current_tab_id
 
             def _create_editor_tab(filepath, _content=""):
+                normalized_file = str(Path(filepath).resolve())
                 for tab_id, data in owner.tabs_data.items():
-                    if os.path.normcase(str(data.get("filepath") or "")) == os.path.normcase(str(filepath)):
+                    if os.path.normcase(str(data.get("filepath") or "")) == os.path.normcase(normalized_file):
                         owner.notebook.select(tab_id)
                         return
+                seed = owner._initial_views.get(os.path.normcase(normalized_file), {})
+                editor = EditorStub(
+                    cursor=seed.get("cursor", "1.0"),
+                    yview=seed.get("yview", 0.0),
+                    xview=seed.get("xview", 0.0),
+                    text=_content,
+                )
                 tab_id = f"tab-{len(owner.tabs_data) + 1}"
-                owner.tabs_data[tab_id] = {"filepath": str(filepath)}
+                fold_lines = sorted(set(owner._initial_folds.get(os.path.normcase(normalized_file), [])))
+                folds = {
+                    int(line_no): {"tag": f"FoldBlock_{int(line_no)}", "end_line": int(line_no) + 1, "collapsed": True}
+                    for line_no in fold_lines
+                    if int(line_no) > 0
+                }
+                owner.tabs_data[tab_id] = {"filepath": normalized_file, "editor": editor, "folds": folds}
                 owner.notebook._tabs.append(tab_id)
                 owner.notebook.select(tab_id)
 
             owner._create_editor_tab = _create_editor_tab
+
+            def _close_all_tabs_silently():
+                owner.tabs_data = {}
+                owner.notebook._tabs = []
+                owner.notebook._selected = None
+
+            owner._close_all_tabs_silently = _close_all_tabs_silently
             return owner
 
-        owner = new_owner()
+        def get_tab_id_by_file(owner, filepath):
+            target = normcase(filepath)
+            for tab_id, data in owner.tabs_data.items():
+                current = os.path.normcase(str(data.get("filepath") or ""))
+                if current == target:
+                    return tab_id
+            return None
+
+        def collapsed_fold_lines(tab_data):
+            folds = tab_data.get("folds", {}) if isinstance(tab_data, dict) else {}
+            rows = []
+            for line_no, meta in folds.items():
+                if not isinstance(meta, dict) or not bool(meta.get("collapsed")):
+                    continue
+                rows.append(int(line_no))
+            return sorted(rows)
+
+        saved_views = {
+            str(file_a): {"cursor": "3.2", "yview": 0.25, "xview": 0.1},
+            str(file_b): {"cursor": "7.1", "yview": 0.6, "xview": 0.55},
+        }
+        saved_folds = {
+            str(file_a): [1],
+            str(file_b): [1],
+        }
+        saved_outline_focus = {
+            str(file_a): 1,
+            str(file_b): 1,
+        }
+
+        owner = new_owner(initial_views=saved_views, initial_folds=saved_folds)
         owner.last_project_dir = str(project)
         owner.recent_projects = [str(project)]
+        owner.find_var.set("关键字-A")
+        owner.replace_var.set("替换-A")
         owner._create_editor_tab(str(file_a), file_a.read_text(encoding="utf-8"))
         owner._create_editor_tab(str(file_b), file_b.read_text(encoding="utf-8"))
+        tab_a_seed = get_tab_id_by_file(owner, file_a)
+        tab_b_seed = get_tab_id_by_file(owner, file_b)
+        owner.tabs_data[tab_a_seed]["outline_focus_line"] = saved_outline_focus[str(file_a)]
+        owner.tabs_data[tab_b_seed]["outline_focus_line"] = saved_outline_focus[str(file_b)]
         owner.notebook.select("tab-1")
 
         flow_save_project_state(owner)
@@ -812,14 +981,48 @@ def check_project_session_state_rules() -> None:
             == [os.path.normcase(str(file_a)), os.path.normcase(str(file_b))],
             f"project state open files mismatch: {loaded.last_session_files}",
         )
+        path_a = str(file_a.resolve())
+        path_b = str(file_b.resolve())
+        loaded_view_a = loaded.last_session_views.get(path_a, {})
+        loaded_view_b = loaded.last_session_views.get(path_b, {})
+        _assert_true(loaded_view_a.get("cursor") == "3.2", f"project state cursor(a) mismatch: {loaded_view_a}")
+        _assert_true(loaded_view_b.get("cursor") == "7.1", f"project state cursor(b) mismatch: {loaded_view_b}")
+        _assert_true(abs(float(loaded_view_a.get("yview", -1.0)) - 0.25) < 1e-9, f"project state yview(a) mismatch: {loaded_view_a}")
+        _assert_true(abs(float(loaded_view_b.get("yview", -1.0)) - 0.6) < 1e-9, f"project state yview(b) mismatch: {loaded_view_b}")
+        _assert_true(abs(float(loaded_view_a.get("xview", -1.0)) - 0.1) < 1e-9, f"project state xview(a) mismatch: {loaded_view_a}")
+        _assert_true(abs(float(loaded_view_b.get("xview", -1.0)) - 0.55) < 1e-9, f"project state xview(b) mismatch: {loaded_view_b}")
+        _assert_true(loaded.last_session_folds.get(path_a) == [1], f"project state folds(a) mismatch: {loaded.last_session_folds}")
+        _assert_true(loaded.last_session_folds.get(path_b) == [1], f"project state folds(b) mismatch: {loaded.last_session_folds}")
+        _assert_true(loaded.last_session_outline_focus.get(path_a) == 1, f"project state outline focus(a) mismatch: {loaded.last_session_outline_focus}")
+        _assert_true(loaded.last_session_outline_focus.get(path_b) == 1, f"project state outline focus(b) mismatch: {loaded.last_session_outline_focus}")
+        _assert_true(loaded.find_var.get() == "关键字-A", f"project state find query mismatch: {loaded.find_var.get()}")
+        _assert_true(loaded.replace_var.get() == "替换-A", f"project state replace query mismatch: {loaded.replace_var.get()}")
 
-        restore_owner = new_owner()
+        restore_views = {
+            str(file_a): {"cursor": "9.4", "yview": 0.33, "xview": 0.2},
+            str(file_b): {"cursor": "2.1", "yview": 0.12, "xview": 0.73},
+            str(file_c): {"cursor": "5.0", "yview": 0.88, "xview": 0.45},
+        }
+        restore_folds = {
+            str(file_a): [1],
+            str(file_b): [1],
+            str(file_c): [1],
+        }
+        restore_outline_focus = {
+            str(file_a): 1,
+            str(file_b): 1,
+            str(file_c): 1,
+        }
+        restore_owner = new_owner(initial_views={str(file_a): {"cursor": "1.0", "yview": 0.0, "xview": 0.0}})
         restore_owner._create_editor_tab(str(file_a), file_a.read_text(encoding="utf-8"))
         restored_count = flow_restore_project_open_tabs(
             restore_owner,
             str(project),
             [str(file_a), str(file_b), str(file_c)],
             preferred_file=str(file_a),
+            open_views=restore_views,
+            open_folds=restore_folds,
+            open_outline_focus=restore_outline_focus,
         )
         opened = [os.path.normcase(str(v.get("filepath") or "")) for v in restore_owner.tabs_data.values()]
         _assert_true(
@@ -833,6 +1036,65 @@ def check_project_session_state_rules() -> None:
             os.path.normcase(str(selected_file or "")) == os.path.normcase(str(file_a)),
             f"project session restore should keep preferred tab active: {selected_file}",
         )
+
+        tab_a = get_tab_id_by_file(restore_owner, file_a)
+        tab_b = get_tab_id_by_file(restore_owner, file_b)
+        tab_c = get_tab_id_by_file(restore_owner, file_c)
+        _assert_true(tab_a and tab_b and tab_c, f"project session restore tabs missing: a={tab_a}, b={tab_b}, c={tab_c}")
+        editor_a = restore_owner.tabs_data[tab_a]["editor"]
+        editor_b = restore_owner.tabs_data[tab_b]["editor"]
+        editor_c = restore_owner.tabs_data[tab_c]["editor"]
+        _assert_true(editor_a.index("insert") == "9.4", f"project session cursor(a) mismatch: {editor_a.index('insert')}")
+        _assert_true(editor_b.index("insert") == "2.1", f"project session cursor(b) mismatch: {editor_b.index('insert')}")
+        _assert_true(editor_c.index("insert") == "5.0", f"project session cursor(c) mismatch: {editor_c.index('insert')}")
+        _assert_true(abs(editor_a.yview()[0] - 0.33) < 1e-9, f"project session yview(a) mismatch: {editor_a.yview()}")
+        _assert_true(abs(editor_b.yview()[0] - 0.12) < 1e-9, f"project session yview(b) mismatch: {editor_b.yview()}")
+        _assert_true(abs(editor_c.yview()[0] - 0.88) < 1e-9, f"project session yview(c) mismatch: {editor_c.yview()}")
+        _assert_true(abs(editor_a.xview()[0] - 0.2) < 1e-9, f"project session xview(a) mismatch: {editor_a.xview()}")
+        _assert_true(abs(editor_b.xview()[0] - 0.73) < 1e-9, f"project session xview(b) mismatch: {editor_b.xview()}")
+        _assert_true(abs(editor_c.xview()[0] - 0.45) < 1e-9, f"project session xview(c) mismatch: {editor_c.xview()}")
+        _assert_true(collapsed_fold_lines(restore_owner.tabs_data[tab_a]) == [1], f"project session folds(a) mismatch: {restore_owner.tabs_data[tab_a].get('folds')}")
+        _assert_true(collapsed_fold_lines(restore_owner.tabs_data[tab_b]) == [1], f"project session folds(b) mismatch: {restore_owner.tabs_data[tab_b].get('folds')}")
+        _assert_true(collapsed_fold_lines(restore_owner.tabs_data[tab_c]) == [1], f"project session folds(c) mismatch: {restore_owner.tabs_data[tab_c].get('folds')}")
+        _assert_true(restore_owner.tabs_data[tab_a].get("outline_focus_line") == 1, f"project session outline focus(a) mismatch: {restore_owner.tabs_data[tab_a]}")
+        _assert_true(restore_owner.tabs_data[tab_b].get("outline_focus_line") == 1, f"project session outline focus(b) mismatch: {restore_owner.tabs_data[tab_b]}")
+        _assert_true(restore_owner.tabs_data[tab_c].get("outline_focus_line") == 1, f"project session outline focus(c) mismatch: {restore_owner.tabs_data[tab_c]}")
+
+        restore_owner2 = new_owner()
+        restore_owner2.last_project_dir = str(project)
+        restore_owner2.last_open_file = str(file_a)
+        restore_owner2.last_session_files = [str(file_a), str(file_b)]
+        restore_owner2.last_session_views = {
+            str(file_a): {"cursor": "11.0", "yview": 0.41, "xview": 0.17},
+            str(file_b): {"cursor": "4.2", "yview": 0.52, "xview": 0.66},
+        }
+        restore_owner2.last_session_folds = {
+            str(file_a): [1],
+            str(file_b): [1],
+        }
+        restore_owner2.last_session_outline_focus = {
+            str(file_a): 1,
+            str(file_b): 1,
+        }
+        restore_owner2.find_var.set("关键字-B")
+        restore_owner2.replace_var.set("替换-B")
+        ok = flow_try_restore_last_project(restore_owner2)
+        _assert_true(ok, "try_restore_last_project should return True for valid project dir")
+        tab_a2 = get_tab_id_by_file(restore_owner2, file_a)
+        tab_b2 = get_tab_id_by_file(restore_owner2, file_b)
+        _assert_true(tab_a2 and tab_b2, f"try_restore should reopen session files: a={tab_a2}, b={tab_b2}")
+        editor_a2 = restore_owner2.tabs_data[tab_a2]["editor"]
+        editor_b2 = restore_owner2.tabs_data[tab_b2]["editor"]
+        _assert_true(editor_a2.index("insert") == "11.0", f"try_restore cursor(a) mismatch: {editor_a2.index('insert')}")
+        _assert_true(editor_b2.index("insert") == "4.2", f"try_restore cursor(b) mismatch: {editor_b2.index('insert')}")
+        _assert_true(abs(editor_a2.yview()[0] - 0.41) < 1e-9, f"try_restore yview(a) mismatch: {editor_a2.yview()}")
+        _assert_true(abs(editor_b2.yview()[0] - 0.52) < 1e-9, f"try_restore yview(b) mismatch: {editor_b2.yview()}")
+        _assert_true(abs(editor_a2.xview()[0] - 0.17) < 1e-9, f"try_restore xview(a) mismatch: {editor_a2.xview()}")
+        _assert_true(abs(editor_b2.xview()[0] - 0.66) < 1e-9, f"try_restore xview(b) mismatch: {editor_b2.xview()}")
+        _assert_true(collapsed_fold_lines(restore_owner2.tabs_data[tab_a2]) == [1], f"try_restore folds(a) mismatch: {restore_owner2.tabs_data[tab_a2].get('folds')}")
+        _assert_true(collapsed_fold_lines(restore_owner2.tabs_data[tab_b2]) == [1], f"try_restore folds(b) mismatch: {restore_owner2.tabs_data[tab_b2].get('folds')}")
+        _assert_true(restore_owner2.tabs_data[tab_a2].get("outline_focus_line") == 1, f"try_restore outline focus(a) mismatch: {restore_owner2.tabs_data[tab_a2]}")
+        _assert_true(restore_owner2.tabs_data[tab_b2].get("outline_focus_line") == 1, f"try_restore outline focus(b) mismatch: {restore_owner2.tabs_data[tab_b2]}")
     print("[OK] project session state rules passed")
 
 def main() -> int:

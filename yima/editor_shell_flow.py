@@ -33,6 +33,9 @@ def initialize_editor(owner, root):
     self.last_project_dir = None
     self.last_open_file = None
     self.last_session_files = []
+    self.last_session_views = {}
+    self.last_session_folds = {}
+    self.last_session_outline_focus = {}
     self._state_dir = os.path.join(os.path.expanduser("~"), ".yima_ide")
     self._state_file = os.path.join(self._state_dir, "editor_state.json")
     self._highlight_after_id = None

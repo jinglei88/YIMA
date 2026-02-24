@@ -407,6 +407,7 @@ def create_editor_tab(owner, filename, content=""):
         "diagnostic_nav_index": 0,
         "folds": {},
         "outline_items": [],
+        "outline_focus_line": None,
         "multi_cursor": {"query": "", "stage": "ranges", "ranges": [], "points": [], "last_abs": -1},
     }
     owner._update_tab_title(tab_id)

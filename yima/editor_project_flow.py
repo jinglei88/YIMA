@@ -175,6 +175,347 @@ def normalize_file_path(owner, path):
     return normalized if os.path.isfile(normalized) else None
 
 
+def normalize_cursor_index(owner, index_text):
+    del owner
+    if index_text is None:
+        return None
+    text = str(index_text).strip()
+    if not text or "." not in text:
+        return None
+    line_text, col_text = text.split(".", 1)
+    if not line_text.isdigit() or not col_text.isdigit():
+        return None
+    line_no = int(line_text)
+    col_no = int(col_text)
+    if line_no < 1 or col_no < 0:
+        return None
+    return f"{line_no}.{col_no}"
+
+
+def normalize_yview(owner, value):
+    del owner
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if number < 0.0:
+        return 0.0
+    if number > 1.0:
+        return 1.0
+    return number
+
+
+def normalize_xview(owner, value):
+    return normalize_yview(owner, value)
+
+
+def normalize_state_text(owner, value, max_len=200):
+    del owner
+    if value is None:
+        return ""
+    text = str(value)
+    limit = max(1, int(max_len or 200))
+    return text[:limit]
+
+
+def normalize_fold_line(owner, value):
+    del owner
+    try:
+        line_no = int(str(value).strip())
+    except Exception:
+        return None
+    return line_no if line_no > 0 else None
+
+
+def _sanitize_fold_lines(owner, raw_lines, max_lines=200):
+    if not isinstance(raw_lines, (list, tuple, set)):
+        return []
+    cleaned = []
+    limit = max(1, int(max_lines or 200))
+    for item in raw_lines:
+        line_no = normalize_fold_line(owner, item)
+        if not line_no or line_no in cleaned:
+            continue
+        cleaned.append(line_no)
+        if len(cleaned) >= limit:
+            break
+    cleaned.sort()
+    return cleaned
+
+
+def _build_normalized_fold_map(owner, raw_folds, max_count=20, max_lines_per_file=200):
+    cleaned = {}
+    if not isinstance(raw_folds, dict):
+        return cleaned
+    limit = max(1, int(max_count or 20))
+    for filepath, raw_lines in raw_folds.items():
+        normalized_path = normalize_file_path(owner, filepath)
+        if not normalized_path or normalized_path in cleaned:
+            continue
+        fold_lines = _sanitize_fold_lines(owner, raw_lines, max_lines=max_lines_per_file)
+        if not fold_lines:
+            continue
+        cleaned[normalized_path] = fold_lines
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _sanitize_view_state(owner, raw_state):
+    if not isinstance(raw_state, dict):
+        return None
+    cursor = normalize_cursor_index(owner, raw_state.get("cursor"))
+    yview = normalize_yview(owner, raw_state.get("yview"))
+    xview = normalize_xview(owner, raw_state.get("xview"))
+    if cursor is None and yview is None and xview is None:
+        return None
+    state = {}
+    if cursor is not None:
+        state["cursor"] = cursor
+    if yview is not None:
+        state["yview"] = yview
+    if xview is not None:
+        state["xview"] = xview
+    return state
+
+
+def _build_normalized_view_map(owner, raw_views, max_count=20):
+    cleaned = {}
+    if not isinstance(raw_views, dict):
+        return cleaned
+    limit = max(1, int(max_count or 20))
+    for filepath, raw_state in raw_views.items():
+        normalized_path = normalize_file_path(owner, filepath)
+        if not normalized_path or normalized_path in cleaned:
+            continue
+        state = _sanitize_view_state(owner, raw_state)
+        if not state:
+            continue
+        cleaned[normalized_path] = state
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def normalize_outline_focus_line(owner, value):
+    return normalize_fold_line(owner, value)
+
+
+def _build_normalized_outline_focus_map(owner, raw_focus_map, max_count=20):
+    cleaned = {}
+    if not isinstance(raw_focus_map, dict):
+        return cleaned
+    limit = max(1, int(max_count or 20))
+    for filepath, raw_line in raw_focus_map.items():
+        normalized_path = normalize_file_path(owner, filepath)
+        if not normalized_path or normalized_path in cleaned:
+            continue
+        line_no = normalize_outline_focus_line(owner, raw_line)
+        if not line_no:
+            continue
+        cleaned[normalized_path] = line_no
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _find_tab_id_by_filepath(owner, filepath):
+    if not filepath:
+        return None
+    target = os.path.normcase(str(filepath))
+    for tab_id, data in getattr(owner, "tabs_data", {}).items():
+        tab_file = str(data.get("filepath") or "")
+        if os.path.normcase(tab_file) == target:
+            return tab_id
+    return None
+
+
+def _count_indent_width(line_text):
+    width = 0
+    for ch in str(line_text or ""):
+        if ch == " ":
+            width += 1
+        elif ch == "\t":
+            width += 4
+        else:
+            break
+    return width
+
+
+def _fallback_block_end_line(editor, start_line):
+    try:
+        line_count = int(str(editor.index("end-1c")).split(".")[0])
+    except Exception:
+        return None
+    if start_line >= line_count:
+        return None
+
+    try:
+        start_text = editor.get(f"{start_line}.0", f"{start_line}.end")
+    except Exception:
+        return None
+    if not str(start_text).strip():
+        return None
+
+    base_indent = _count_indent_width(start_text)
+    end_line = start_line
+    has_child = False
+
+    for ln in range(start_line + 1, line_count + 1):
+        try:
+            text = editor.get(f"{ln}.0", f"{ln}.end")
+        except Exception:
+            break
+        stripped = str(text).strip()
+        if not stripped:
+            if has_child:
+                end_line = ln
+            continue
+
+        indent = _count_indent_width(text)
+        if indent > base_indent:
+            has_child = True
+            end_line = ln
+            continue
+        break
+
+    while end_line > start_line:
+        try:
+            text = editor.get(f"{end_line}.0", f"{end_line}.end")
+        except Exception:
+            break
+        if str(text).strip():
+            break
+        end_line -= 1
+
+    if not has_child or end_line <= start_line:
+        return None
+    return end_line
+
+
+def _resolve_fold_end_line(owner, editor, start_line):
+    resolver = getattr(owner, "_get_block_end_line", None)
+    if callable(resolver):
+        try:
+            end_line = resolver(editor, start_line)
+        except Exception:
+            end_line = None
+        if isinstance(end_line, int) and end_line > start_line:
+            return end_line
+    return _fallback_block_end_line(editor, start_line)
+
+
+def _clear_tab_folds(owner, tab_id):
+    data = getattr(owner, "tabs_data", {}).get(tab_id, {})
+    editor = data.get("editor")
+    if editor is None:
+        data["folds"] = {}
+        return
+    folds = data.get("folds", {})
+    if isinstance(folds, dict):
+        for fold_meta in folds.values():
+            if not isinstance(fold_meta, dict):
+                continue
+            tag = fold_meta.get("tag")
+            if not tag:
+                continue
+            try:
+                editor.tag_remove(tag, "1.0", "end")
+            except Exception:
+                pass
+            try:
+                editor.tag_configure(tag, elide=False)
+            except Exception:
+                pass
+    data["folds"] = {}
+
+
+def apply_tab_fold_state(owner, tab_id, fold_lines):
+    if not tab_id:
+        return 0
+    data = getattr(owner, "tabs_data", {}).get(tab_id, {})
+    editor = data.get("editor")
+    if editor is None:
+        data["folds"] = {}
+        return 0
+
+    target_lines = _sanitize_fold_lines(owner, fold_lines, max_lines=200)
+    _clear_tab_folds(owner, tab_id)
+    if not target_lines:
+        return 0
+
+    folds = {}
+    applied = 0
+    for line_no in target_lines:
+        end_line = _resolve_fold_end_line(owner, editor, line_no)
+        if not end_line:
+            continue
+
+        tag_name = f"FoldBlock_{line_no}"
+        try:
+            editor.tag_configure(tag_name, elide=True)
+            editor.tag_remove(tag_name, "1.0", "end")
+            editor.tag_add(tag_name, f"{line_no + 1}.0", f"{end_line}.end+1c")
+        except Exception:
+            continue
+
+        folds[line_no] = {"tag": tag_name, "end_line": end_line, "collapsed": True}
+        applied += 1
+    data["folds"] = folds
+
+    current_tab_id = None
+    getter = getattr(owner, "_get_current_tab_id", None)
+    if callable(getter):
+        try:
+            current_tab_id = getter()
+        except Exception:
+            current_tab_id = None
+    if current_tab_id == tab_id:
+        updater = getattr(owner, "_update_line_numbers", None)
+        if callable(updater):
+            try:
+                updater()
+            except Exception:
+                pass
+    return applied
+
+
+def apply_tab_view_state(owner, tab_id, view_state):
+    if not tab_id or not view_state:
+        return False
+    data = getattr(owner, "tabs_data", {}).get(tab_id, {})
+    editor = data.get("editor")
+    if editor is None:
+        return False
+
+    cursor = normalize_cursor_index(owner, view_state.get("cursor"))
+    yview = normalize_yview(owner, view_state.get("yview"))
+    xview = normalize_xview(owner, view_state.get("xview"))
+    applied = False
+
+    if cursor is not None:
+        try:
+            editor.mark_set("insert", cursor)
+            applied = True
+        except Exception:
+            pass
+
+    if yview is not None:
+        try:
+            editor.yview_moveto(yview)
+            applied = True
+        except Exception:
+            pass
+
+    if xview is not None:
+        try:
+            editor.xview_moveto(xview)
+            applied = True
+        except Exception:
+            pass
+    return applied
+
+
 
 def _list_open_tab_ids(owner):
     notebook = getattr(owner, "notebook", None)
@@ -201,8 +542,93 @@ def collect_state_open_files(owner, max_count=20):
             break
     return files
 
+
+def collect_state_open_views(owner, max_count=20):
+    views = {}
+    limit = max(1, int(max_count or 20))
+    for tab_id in _list_open_tab_ids(owner):
+        data = getattr(owner, "tabs_data", {}).get(tab_id, {})
+        filepath = normalize_file_path(owner, data.get("filepath"))
+        if not filepath or filepath in views:
+            continue
+        editor = data.get("editor")
+        if editor is None:
+            continue
+        raw_state = {}
+        try:
+            raw_state["cursor"] = editor.index("insert")
+        except Exception:
+            pass
+        try:
+            yview = editor.yview()
+            if isinstance(yview, (list, tuple)) and yview:
+                raw_state["yview"] = yview[0]
+        except Exception:
+            pass
+        try:
+            xview = editor.xview()
+            if isinstance(xview, (list, tuple)) and xview:
+                raw_state["xview"] = xview[0]
+        except Exception:
+            pass
+        state = _sanitize_view_state(owner, raw_state)
+        if not state:
+            continue
+        views[filepath] = state
+        if len(views) >= limit:
+            break
+    return views
+
+
+def collect_state_open_folds(owner, max_count=20):
+    folds_map = {}
+    limit = max(1, int(max_count or 20))
+    for tab_id in _list_open_tab_ids(owner):
+        data = getattr(owner, "tabs_data", {}).get(tab_id, {})
+        filepath = normalize_file_path(owner, data.get("filepath"))
+        if not filepath or filepath in folds_map:
+            continue
+        folds = data.get("folds", {})
+        if not isinstance(folds, dict):
+            continue
+        collapsed_lines = []
+        for line_no, fold_meta in folds.items():
+            if not isinstance(fold_meta, dict) or not bool(fold_meta.get("collapsed")):
+                continue
+            normalized_line = normalize_fold_line(owner, line_no)
+            if normalized_line:
+                collapsed_lines.append(normalized_line)
+        collapsed_lines = _sanitize_fold_lines(owner, collapsed_lines, max_lines=200)
+        if not collapsed_lines:
+            continue
+        folds_map[filepath] = collapsed_lines
+        if len(folds_map) >= limit:
+            break
+    return folds_map
+
+
+def collect_state_open_outline_focus(owner, max_count=20):
+    focus_map = {}
+    limit = max(1, int(max_count or 20))
+    for tab_id in _list_open_tab_ids(owner):
+        data = getattr(owner, "tabs_data", {}).get(tab_id, {})
+        filepath = normalize_file_path(owner, data.get("filepath"))
+        if not filepath or filepath in focus_map:
+            continue
+        line_no = normalize_outline_focus_line(owner, data.get("outline_focus_line"))
+        if not line_no:
+            continue
+        focus_map[filepath] = line_no
+        if len(focus_map) >= limit:
+            break
+    return focus_map
+
+
 def load_project_state(owner):
     owner.last_session_files = []
+    owner.last_session_views = {}
+    owner.last_session_folds = {}
+    owner.last_session_outline_focus = {}
     try:
         if not os.path.exists(owner._state_file):
             return
@@ -232,9 +658,20 @@ def load_project_state(owner):
                     cleaned_files.append(normalized)
             owner.last_session_files = cleaned_files[:20]
 
+        owner.last_session_views = _build_normalized_view_map(owner, state.get("open_file_views", {}), max_count=20)
+        owner.last_session_folds = _build_normalized_fold_map(owner, state.get("open_file_folds", {}), max_count=20, max_lines_per_file=200)
+        owner.last_session_outline_focus = _build_normalized_outline_focus_map(owner, state.get("open_file_outline_focus", {}), max_count=20)
+
         active_file = normalize_file_path(owner, state.get("active_file"))
         if active_file:
             owner.last_open_file = active_file
+
+        find_var = getattr(owner, "find_var", None)
+        if hasattr(find_var, "set"):
+            find_var.set(normalize_state_text(owner, state.get("find_query", ""), max_len=300))
+        replace_var = getattr(owner, "replace_var", None)
+        if hasattr(replace_var, "set"):
+            replace_var.set(normalize_state_text(owner, state.get("replace_query", ""), max_len=300))
     except Exception as e:
         print(f"?? ?????????????{e}")
 
@@ -242,16 +679,31 @@ def save_project_state(owner):
     try:
         os.makedirs(owner._state_dir, exist_ok=True)
         open_files = collect_state_open_files(owner, max_count=20)
+        open_views = collect_state_open_views(owner, max_count=20)
+        open_folds = collect_state_open_folds(owner, max_count=20)
+        open_outline_focus = collect_state_open_outline_focus(owner, max_count=20)
         owner.last_session_files = list(open_files)
+        owner.last_session_views = dict(open_views)
+        owner.last_session_folds = dict(open_folds)
+        owner.last_session_outline_focus = dict(open_outline_focus)
         active_file = current_open_file(owner) or owner.last_open_file
         if active_file:
             owner.last_open_file = active_file
+        find_var = getattr(owner, "find_var", None)
+        replace_var = getattr(owner, "replace_var", None)
+        find_query = normalize_state_text(owner, find_var.get() if hasattr(find_var, "get") else "", max_len=300)
+        replace_query = normalize_state_text(owner, replace_var.get() if hasattr(replace_var, "get") else "", max_len=300)
         state = {
             "last_project": owner.last_project_dir if owner.last_project_dir else "",
             "last_open_file": owner.last_open_file if owner.last_open_file else "",
             "project_history": owner.recent_projects[:20],
             "open_files": open_files,
+            "open_file_views": open_views,
+            "open_file_folds": open_folds,
+            "open_file_outline_focus": open_outline_focus,
             "active_file": active_file if active_file else "",
+            "find_query": find_query,
+            "replace_query": replace_query,
         }
         with open(owner._state_file, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
@@ -375,20 +827,42 @@ def switch_project(owner, dir_path, preferred_file=None, create_blank_if_empty=T
     return True
 
 
-def restore_project_open_tabs(owner, project_dir, open_files, preferred_file=None):
+def restore_project_open_tabs(
+    owner,
+    project_dir,
+    open_files,
+    preferred_file=None,
+    open_views=None,
+    open_folds=None,
+    open_outline_focus=None,
+):
     root = normalize_project_dir(owner, project_dir)
     if not root:
         return 0
 
     preferred_abs = normalize_file_path(owner, preferred_file)
+    raw_views = open_views if isinstance(open_views, dict) else getattr(owner, "last_session_views", {})
+    raw_folds = open_folds if isinstance(open_folds, dict) else getattr(owner, "last_session_folds", {})
+    raw_outline_focus = (
+        open_outline_focus
+        if isinstance(open_outline_focus, dict)
+        else getattr(owner, "last_session_outline_focus", {})
+    )
+    normalized_views = _build_normalized_view_map(owner, raw_views, max_count=20)
+    normalized_folds = _build_normalized_fold_map(owner, raw_folds, max_count=20, max_lines_per_file=200)
+    normalized_outline_focus = _build_normalized_outline_focus_map(owner, raw_outline_focus, max_count=20)
+    views_by_normcase = {os.path.normcase(path): state for path, state in normalized_views.items()}
+    folds_by_normcase = {os.path.normcase(path): lines for path, lines in normalized_folds.items()}
+    outline_focus_by_normcase = {
+        os.path.normcase(path): line_no
+        for path, line_no in normalized_outline_focus.items()
+    }
     restored = 0
     files = list(open_files or [])
 
     for filepath in files:
         normalized = normalize_file_path(owner, filepath)
         if not normalized:
-            continue
-        if preferred_abs and os.path.normcase(normalized) == os.path.normcase(preferred_abs):
             continue
         try:
             if os.path.commonpath([root, normalized]) != root:
@@ -404,42 +878,70 @@ def restore_project_open_tabs(owner, project_dir, open_files, preferred_file=Non
             after = set(getattr(owner, "tabs_data", {}).keys())
             if after != before:
                 restored += 1
+            tab_id = _find_tab_id_by_filepath(owner, normalized)
+            if tab_id:
+                data = getattr(owner, "tabs_data", {}).get(tab_id, {})
+                focus_line = outline_focus_by_normcase.get(os.path.normcase(normalized))
+                if focus_line:
+                    data["outline_focus_line"] = focus_line
+                apply_tab_fold_state(owner, tab_id, folds_by_normcase.get(os.path.normcase(normalized), []))
+                apply_tab_view_state(owner, tab_id, views_by_normcase.get(os.path.normcase(normalized)))
         except Exception as e:
             printer = getattr(owner, "print_output", None)
             if callable(printer):
                 printer(f"?? ?????????{normalized}?{e}?")
 
     if preferred_abs:
-        for tab_id, data in getattr(owner, "tabs_data", {}).items():
-            tab_file = str(data.get("filepath") or "")
-            if os.path.normcase(tab_file) == os.path.normcase(preferred_abs):
-                try:
-                    owner.notebook.select(tab_id)
-                except Exception:
-                    pass
-                break
+        preferred_tab_id = _find_tab_id_by_filepath(owner, preferred_abs)
+        if preferred_tab_id:
+            preferred_data = getattr(owner, "tabs_data", {}).get(preferred_tab_id, {})
+            preferred_focus_line = outline_focus_by_normcase.get(os.path.normcase(preferred_abs))
+            if preferred_focus_line:
+                preferred_data["outline_focus_line"] = preferred_focus_line
+            apply_tab_fold_state(owner, preferred_tab_id, folds_by_normcase.get(os.path.normcase(preferred_abs), []))
+            apply_tab_view_state(owner, preferred_tab_id, views_by_normcase.get(os.path.normcase(preferred_abs)))
+            try:
+                owner.notebook.select(preferred_tab_id)
+            except Exception:
+                pass
+
+    refresh_outline = getattr(owner, "_refresh_outline", None)
+    if callable(refresh_outline):
+        try:
+            refresh_outline()
+        except Exception:
+            pass
     return restored
 
 def try_restore_last_project(owner):
     if not owner.last_project_dir or not os.path.isdir(owner.last_project_dir):
         return False
+    snapshot_files = list(getattr(owner, "last_session_files", []) or [])
+    snapshot_views = dict(getattr(owner, "last_session_views", {}) or {})
+    snapshot_folds = dict(getattr(owner, "last_session_folds", {}) or {})
+    snapshot_outline_focus = dict(getattr(owner, "last_session_outline_focus", {}) or {})
+    preferred_file = owner.last_open_file
     restored = switch_project(
         owner,
         owner.last_project_dir,
-        preferred_file=owner.last_open_file,
+        preferred_file=preferred_file,
         create_blank_if_empty=False,
     )
     if not restored:
         return False
 
-    session_files = list(getattr(owner, "last_session_files", []) or [])
+    session_files = snapshot_files
     if session_files:
         restore_project_open_tabs(
             owner,
             owner.last_project_dir,
             session_files,
-            preferred_file=owner.last_open_file,
+            preferred_file=preferred_file,
+            open_views=snapshot_views,
+            open_folds=snapshot_folds,
+            open_outline_focus=snapshot_outline_focus,
         )
+    save_project_state(owner)
     return True
 
 def open_recent_project_menu(owner):

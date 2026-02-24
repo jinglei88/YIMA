@@ -1,0 +1,11 @@
+{
+  "hidden_imports": [
+    "requests"
+  ],
+  "datas": [
+    {
+      "src": "assets",
+      "dest": "assets"
+    }
+  ]
+}

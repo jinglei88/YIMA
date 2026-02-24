@@ -9,8 +9,8 @@ from __future__ import annotations
 # Project: 易码 / Yima
 # Marker-ID: YIMA-JINGLEI-CORE
 
-__author__ = "景磊"
-__copyright__ = "Copyright (c) 2026 景磊"
+__author__ = "\u666f\u78ca"
+__copyright__ = "Copyright (c) 2026 \u666f\u78ca"
 __marker_id__ = "YIMA-JINGLEI-CORE"
 
 import re
@@ -87,14 +87,15 @@ def refresh_outline(owner):
         owner.outline_listbox.delete(0, tk.END)
         return
 
-    previous_selected_line = None
+    previous_selected_line = owner.tabs_data[tab_id].get("outline_focus_line")
     try:
-        prev_idx = owner.outline_listbox.curselection()
-        if prev_idx:
-            prev_item = owner.tabs_data[tab_id].get("outline_items", [])[prev_idx[0]]
-            previous_selected_line = prev_item.get("line")
+        if not previous_selected_line:
+            prev_idx = owner.outline_listbox.curselection()
+            if prev_idx:
+                prev_item = owner.tabs_data[tab_id].get("outline_items", [])[prev_idx[0]]
+                previous_selected_line = prev_item.get("line")
     except Exception:
-        previous_selected_line = None
+        pass
 
     owner.outline_listbox.delete(0, tk.END)
     code_lines = editor.get("1.0", "end-1c").splitlines()
@@ -108,14 +109,14 @@ def refresh_outline(owner):
 
         kind = None
         name = None
-        m_func = re.match(r"^\s*功能\s+([^\s(（]+)", line_text)
+        m_func = re.match(r"^\s*\u529f\u80fd\s+([^\s(\uff08]+)", line_text)
         if m_func:
-            kind = "功能"
+            kind = "\u529f\u80fd"
             name = m_func.group(1)
         else:
-            m_class = re.match(r"^\s*定义图纸\s+([^\s(（]+)", line_text)
+            m_class = re.match(r"^\s*\u5b9a\u4e49\u56fe\u7eb8\s+([^\s(\uff08]+)", line_text)
             if m_class:
-                kind = "图纸"
+                kind = "\u56fe\u7eb8"
                 name = m_class.group(1)
 
         if not kind or not name:
@@ -124,7 +125,7 @@ def refresh_outline(owner):
         indent_level = owner._count_indent_width(line_text) // 4
         collapsed = bool(folds.get(line_no, {}).get("collapsed"))
         marker = "[+]" if collapsed else "[-]"
-        kind_mark = "功能" if kind == "功能" else "图纸"
+        kind_mark = "\u529f\u80fd" if kind == "\u529f\u80fd" else "\u56fe\u7eb8"
         indent_prefix = "  " * min(indent_level, 6)
         display_text = f"{indent_prefix}{marker} {kind_mark} {name}  (L{line_no})"
 
@@ -140,7 +141,7 @@ def refresh_outline(owner):
     owner.tabs_data[tab_id]["outline_items"] = items
 
     if not items:
-        owner.outline_listbox.insert(tk.END, "(当前文件暂无功能/图纸结构)")
+        owner.outline_listbox.insert(tk.END, "(\u5f53\u524d\u6587\u4ef6\u6682\u65e0\u529f\u80fd/\u56fe\u7eb8\u7ed3\u6784)")
         try:
             owner.outline_listbox.itemconfig(0, foreground="#777777")
         except tk.TclError:
@@ -156,6 +157,7 @@ def refresh_outline(owner):
     owner.outline_listbox.selection_clear(0, tk.END)
     owner.outline_listbox.selection_set(selected_idx)
     owner.outline_listbox.activate(selected_idx)
+    owner.tabs_data[tab_id]["outline_focus_line"] = items[selected_idx].get("line")
 
 
 def get_selected_outline_item(owner):
@@ -174,14 +176,21 @@ def get_selected_outline_item(owner):
 
 def outline_update_status(owner, event=None):
     del event
+    tab_id = owner._get_current_tab_id()
+    if not tab_id or tab_id not in owner.tabs_data:
+        return
     item = owner._get_selected_outline_item()
     if not item:
         return
-    owner.status_main_var.set(f"大纲：{item['kind']} {item['name']}（第 {item['line']} 行）")
+    owner.tabs_data[tab_id]["outline_focus_line"] = item.get("line")
+    owner.status_main_var.set("大纲项已选中")
 
 
 def on_outline_activate(owner, event=None):
     del event
+    tab_id = owner._get_current_tab_id()
+    if not tab_id or tab_id not in owner.tabs_data:
+        return "break"
     item = owner._get_selected_outline_item()
     if not item:
         return "break"
@@ -189,13 +198,14 @@ def on_outline_activate(owner, event=None):
     if not editor:
         return "break"
 
-    target = f"{item['line']}.0"
+    target = f"{item.get('line')}.0"
     editor.mark_set("insert", target)
     editor.see(target)
     editor.focus_set()
     owner._highlight_current_line()
     owner._update_cursor_status()
-    owner.status_main_var.set(f"已定位到：{item['kind']} {item['name']}（第 {item['line']} 行）")
+    owner.tabs_data[tab_id]["outline_focus_line"] = item.get("line")
+    owner.status_main_var.set("已根据大纲定位")
     return "break"
 
 
@@ -264,9 +274,9 @@ def toggle_fold_from_outline(owner, event=None):
     ok = owner._toggle_fold_by_line(item["line"])
     if ok:
         owner._refresh_outline()
-        owner.status_main_var.set(f"已切换折叠：{item['kind']} {item['name']}")
+        owner.status_main_var.set(f"\u5df2\u5207\u6362\u6298\u53e0\uff1a{item['kind']} {item['name']}")
     else:
-        owner.status_main_var.set("当前位置没有可折叠代码块")
+        owner.status_main_var.set("\u5f53\u524d\u4f4d\u7f6e\u6ca1\u6709\u53ef\u6298\u53e0\u4ee3\u7801\u5757")
     return "break"
 
 
@@ -279,9 +289,9 @@ def toggle_fold_current_line(owner, event=None):
     ok = owner._toggle_fold_by_line(line_no)
     if ok:
         owner._refresh_outline()
-        owner.status_main_var.set(f"已切换第 {line_no} 行代码块折叠")
+        owner.status_main_var.set(f"\u5df2\u5207\u6362\u7b2c {line_no} \u884c\u4ee3\u7801\u5757\u6298\u53e0")
     else:
-        owner.status_main_var.set("当前位置没有可折叠代码块")
+        owner.status_main_var.set("\u5f53\u524d\u4f4d\u7f6e\u6ca1\u6709\u53ef\u6298\u53e0\u4ee3\u7801\u5757")
     return "break"
 
 
@@ -323,7 +333,7 @@ def toggle_fold_by_canvas_hit(owner, event):
     ok = owner._toggle_fold_by_line(line_no)
     if ok:
         owner._refresh_outline()
-        owner.status_main_var.set(f"已切换第 {line_no} 行代码块折叠")
+        owner.status_main_var.set(f"\u5df2\u5207\u6362\u7b2c {line_no} \u884c\u4ee3\u7801\u5757\u6298\u53e0")
         return True
     return False
 
@@ -374,8 +384,8 @@ def update_indent_guides(owner, event=None):
     canvas.delete("all")
 
     guide_colors = ["#333333", "#3B3B5A", "#333333", "#3B3B5A"]
-    func_pattern = re.compile(r"^\s*功能\s+([^\s(（]+)")
-    blueprint_pattern = re.compile(r"^\s*定义图纸\s+([^\s(（]+)")
+    func_pattern = re.compile(r"^\s*\u529f\u80fd\s+([^\s(\uff08]+)")
+    blueprint_pattern = re.compile(r"^\s*\u5b9a\u4e49\u56fe\u7eb8\s+([^\s(\uff08]+)")
 
     try:
         first_line = int(editor.index("@0,0").split(".")[0])
@@ -393,9 +403,9 @@ def update_indent_guides(owner, event=None):
         stripped = line_text.lstrip()
         decl_kind = None
         if func_pattern.match(line_text):
-            decl_kind = "功能"
+            decl_kind = "\u529f\u80fd"
         elif blueprint_pattern.match(line_text):
-            decl_kind = "图纸"
+            decl_kind = "\u56fe\u7eb8"
 
         if stripped:
             indent = len(line_text) - len(stripped)
@@ -440,7 +450,7 @@ def update_indent_guides(owner, event=None):
     for row in line_data:
         line_num = row["line"]
         decl_kind = row["kind"]
-        if decl_kind not in ("功能", "图纸"):
+        if decl_kind not in ("\u529f\u80fd", "\u56fe\u7eb8"):
             continue
 
         end_line = owner._get_block_end_line(editor, line_num)
@@ -450,9 +460,9 @@ def update_indent_guides(owner, event=None):
         _, y, _, h = row["bbox"]
         y_center = int(y + h / 2)
         collapsed = bool(folds.get(line_num, {}).get("collapsed"))
-        symbol = "▶" if collapsed else "▼"
+        symbol = "▸" if collapsed else "▾"
 
-        if decl_kind == "功能":
+        if decl_kind == "\u529f\u80fd":
             base_fill = "#2A5A41"
             base_outline = "#3C7A5A"
             label_fg = "#8CE3B4"
@@ -507,4 +517,3 @@ def highlight_current_line(owner, event=None):
         return
     editor.tag_remove("CurrentLine", "1.0", "end")
     editor.tag_add("CurrentLine", "insert linestart", "insert lineend+1c")
-
