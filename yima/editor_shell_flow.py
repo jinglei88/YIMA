@@ -15,6 +15,7 @@ __marker_id__ = "YIMA-JINGLEI-CORE"
 
 import os
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 
 
@@ -22,6 +23,10 @@ def initialize_editor(owner, root):
     self = owner
     self.root = root
     self.root.title("易码 - 极简中文编程语言")
+    try:
+        self.root._易码IDE根窗口 = True
+    except Exception:
+        pass
     
     # 维护多标签状态数据
     # 格式: { tab_id: { "filepath": str, "editor": ScrolledText, "line_numbers": Text } }
@@ -47,6 +52,12 @@ def initialize_editor(owner, root):
     self._py_module_member_signature_cache = {}
     self._runtime_builtin_signature_cache = {}
     self._runtime_builtin_signature_loaded = False
+    self._quick_view_last_text = ""
+    self._cheatsheet_window = None
+    self._cheatsheet_headings_all = []
+    self._cheatsheet_headings_visible = []
+    self._cheatsheet_quick_items_all = []
+    self._cheatsheet_quick_items_visible = []
     self.find_dialog = None
     self.find_var = tk.StringVar(value="")
     self.replace_var = tk.StringVar(value="")
@@ -84,17 +95,45 @@ def initialize_editor(owner, root):
     
     # 加载并设置窗口图标与小图标
     self.icon_file = None
+    self._app_icon_image = None
+    self._tree_icon_image = None
     try:
-        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
-        if os.path.exists(logo_path):
-            img = tk.PhotoImage(file=logo_path)
-            self.root.iconphoto(True, img)
-            # 缩小为侧边栏使用的小图标
-            # 高分屏下缩小倍数相应减小，使图标稍微变大
-            subsample_factor = max(1, int(18 / self.dpi_scale))
-            self.icon_file = img.subsample(subsample_factor, subsample_factor)
+        module_dir = Path(__file__).resolve().parent
+        project_root = module_dir.parent
+        png_candidates = [project_root / "logo.png", module_dir / "logo.png"]
+        ico_candidates = [project_root / "logo.ico", module_dir / "logo.ico"]
+
+        # Windows 下优先 .ico，可改善任务栏/窗口标题图标兼容性
+        if os.name == "nt":
+            for ico_path in ico_candidates:
+                if not ico_path.exists():
+                    continue
+                try:
+                    self.root.iconbitmap(default=str(ico_path))
+                    break
+                except Exception:
+                    continue
+
+        for png_path in png_candidates:
+            if not png_path.exists():
+                continue
+            try:
+                img = tk.PhotoImage(file=str(png_path))
+                self.root.iconphoto(True, img)
+                self._app_icon_image = img
+                # 缩小为侧边栏使用的小图标
+                # 高分屏下缩小倍数相应减小，使图标稍微变大
+                subsample_factor = max(1, int(18 / self.dpi_scale))
+                self._tree_icon_image = img.subsample(subsample_factor, subsample_factor)
+                self.icon_file = self._tree_icon_image
+                break
+            except Exception:
+                continue
+
+        if self._app_icon_image is None:
+            raise FileNotFoundError("logo.png / logo.ico 未找到可用图标")
     except Exception as e:
-        print(f"⚠️ 小提示：找不到图标文件 logo.png：{e}")
+        print(f"⚠️ 小提示：加载图标失败：{e}")
         
     # 根据系统缩放重设初始窗口大小（默认更大，并避免超出屏幕）
     screen_w = self.root.winfo_screenwidth()

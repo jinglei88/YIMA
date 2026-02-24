@@ -110,6 +110,7 @@ def compile_check() -> None:
         "yima/环境.py",
         "yima/错误.py",
         "yima/信号.py",
+        "yima/editor_cheatsheet_flow.py",
     ]
     with tempfile.TemporaryDirectory(prefix="yima_pycache_", dir=ROOT) as td:
         run_cmd([PY, "-m", "py_compile", *files], env={"PYTHONPYCACHEPREFIX": td})

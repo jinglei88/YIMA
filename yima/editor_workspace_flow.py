@@ -99,6 +99,7 @@ def on_tab_changed(owner, event):
         owner._run_live_diagnose()
         owner._highlight_find_matches()
         owner._refresh_outline()
+        owner._refresh_quick_view()
         owner._render_multi_cursor_state()
         current_file = owner._current_open_file()
         if current_file:

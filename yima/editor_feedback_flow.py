@@ -158,6 +158,119 @@ def set_issue_detail_text(owner, text):
     owner.issue_detail_var.set(str(text or "").strip() or "（当前无选中问题）")
 
 
+def update_quick_view_wrap(owner, event=None):
+    if not hasattr(owner, "quick_view_label"):
+        return
+    try:
+        width = owner.quick_view_label.winfo_width()
+        if event is not None and hasattr(event, "width"):
+            width = int(event.width)
+        owner.quick_view_label.configure(wraplength=max(140, int(width) - 16))
+    except tk.TclError:
+        pass
+
+
+def set_quick_view_text(owner, text):
+    if not hasattr(owner, "quick_view_var"):
+        return
+    owner.quick_view_var.set(str(text or "").strip() or "（暂无快速查看信息）")
+
+
+def _truncate_quick_line_text(text, max_len=70):
+    value = str(text or "").strip().replace("\n", " ")
+    if not value:
+        return "（空行）"
+    if len(value) <= max_len:
+        return value
+    return value[: max(1, max_len - 1)] + "…"
+
+
+def _nearest_outline_item(tab_data, cursor_line):
+    items = tab_data.get("outline_items", []) or []
+    nearest = None
+    for item in items:
+        try:
+            line_no = int(item.get("line") or 0)
+        except Exception:
+            line_no = 0
+        if line_no <= cursor_line and line_no > 0:
+            nearest = item
+        elif line_no > cursor_line:
+            break
+    return nearest
+
+
+def build_quick_view_text(owner, tab_id, editor):
+    tab_data = owner.tabs_data.get(tab_id, {})
+    filepath = tab_data.get("filepath", "未命名代码.ym")
+    display_name = os.path.basename(filepath) if filepath != "未命名代码.ym" else "未命名代码.ym"
+    dirty = "未保存" if tab_data.get("dirty") else "已保存"
+
+    line, col = 1, 0
+    try:
+        line_text, col_text = editor.index("insert").split(".")
+        line, col = int(line_text), int(col_text)
+    except (ValueError, tk.TclError):
+        pass
+
+    symbol = "（无）"
+    try:
+        symbol_name = owner._get_symbol_near_cursor(editor)
+        if symbol_name:
+            symbol = symbol_name
+    except Exception:
+        pass
+
+    line_preview = "（空行）"
+    try:
+        line_preview = _truncate_quick_line_text(editor.get(f"{line}.0", f"{line}.end"))
+    except tk.TclError:
+        pass
+
+    issue_items = build_issue_items(owner, tab_id)
+    error_count = sum(1 for item in issue_items if str(item.get("level")) == "error")
+    warn_count = sum(1 for item in issue_items if str(item.get("level")) != "error")
+
+    nearest = _nearest_outline_item(tab_data, line)
+    if nearest:
+        context_text = f"{nearest.get('kind', '结构')} {nearest.get('name', '')}（L{nearest.get('line', '?')}）"
+    else:
+        context_text = "（顶层）"
+
+    return (
+        f"文件：{display_name}（{dirty}）\n"
+        f"光标：第 {line} 行，第 {col + 1} 列\n"
+        f"符号：{symbol}\n"
+        f"结构：{context_text}\n"
+        f"问题：错误 {error_count}，提示 {warn_count}\n"
+        f"行内容：{line_preview}"
+    )
+
+
+def refresh_quick_view(owner, event=None):
+    del event
+    if not hasattr(owner, "quick_view_var"):
+        return
+
+    empty_hint = "（打开代码文件后可查看当前光标上下文）"
+    prev_text = str(getattr(owner, "_quick_view_last_text", "") or "")
+    tab_id = owner._get_current_tab_id()
+    editor = owner._get_current_editor()
+    if not tab_id or tab_id not in owner.tabs_data or not editor:
+        set_quick_view_text(owner, empty_hint)
+        owner._quick_view_last_text = empty_hint
+        if hasattr(owner, "_clear_feedback_tab"):
+            owner._clear_feedback_tab("quick")
+        return
+
+    new_text = build_quick_view_text(owner, tab_id, editor)
+    set_quick_view_text(owner, new_text)
+    owner._quick_view_last_text = str(new_text)
+    if str(new_text) != prev_text and prev_text.strip():
+        if hasattr(owner, "_mark_feedback_tab"):
+            owner._mark_feedback_tab("quick", active=True)
+
+
 def refresh_issue_list(owner):
     if not hasattr(owner, "issue_listbox"):
         return
@@ -171,6 +284,9 @@ def refresh_issue_list(owner):
             set_issue_detail_text(owner, "（当前文件无语法/语义问题）")
         except tk.TclError:
             pass
+        if hasattr(owner, "_clear_feedback_tab"):
+            owner._clear_feedback_tab("issue")
+        refresh_quick_view(owner)
         return
 
     问题列表 = build_issue_items(owner, tab_id)
@@ -190,6 +306,9 @@ def refresh_issue_list(owner):
             pass
         owner.issue_count_var.set("0")
         set_issue_detail_text(owner, "（当前文件无语法/语义问题）")
+        if hasattr(owner, "_clear_feedback_tab"):
+            owner._clear_feedback_tab("issue")
+        refresh_quick_view(owner)
         return
 
     owner.issue_count_var.set(str(len(问题列表)))
@@ -206,6 +325,9 @@ def refresh_issue_list(owner):
     owner.issue_listbox.selection_set(0)
     owner.issue_listbox.activate(0)
     issue_update_status(owner)
+    if hasattr(owner, "_mark_feedback_tab"):
+        owner._mark_feedback_tab("issue", active=True)
+    refresh_quick_view(owner)
 
 
 def get_selected_issue_item(owner):
@@ -226,6 +348,7 @@ def issue_update_status(owner, event=None):
     item = get_selected_issue_item(owner)
     if not item:
         set_issue_detail_text(owner, "（当前无选中问题）")
+        refresh_quick_view(owner)
         return
     级别文本 = "错误" if item.get("level") == "error" else "提示"
     分类文本 = "语法" if item.get("level") == "error" else str(item.get("category", "语义") or "语义")
@@ -239,6 +362,7 @@ def issue_update_status(owner, event=None):
         f"详情：{消息 if 消息 else '（无详细信息）'}"
     )
     set_issue_detail_text(owner, 详情文本)
+    refresh_quick_view(owner)
 
 
 def on_issue_activate(owner, event=None):
@@ -288,6 +412,7 @@ def update_cursor_status(owner, event=None):
     except (ValueError, tk.TclError):
         pass
     update_status_main(owner)
+    refresh_quick_view(owner)
 
 
 def on_editor_modified(owner, event):

@@ -16,7 +16,13 @@ import os
 
 # 将当前目录添加到系统路径，确保能找到 yima 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from yima.editor_main_ui import setup_ui as ui_setup_ui
+from yima.editor_main_ui import (
+    clear_feedback_tab as ui_clear_feedback_tab,
+    mark_feedback_tab as ui_mark_feedback_tab,
+    on_feedback_tab_changed as ui_on_feedback_tab_changed,
+    refresh_feedback_tab_badges as ui_refresh_feedback_tab_badges,
+    setup_ui as ui_setup_ui,
+)
 from yima.editor_project_flow import (
     clear_code as ui_clear_code,
     clear_recent_projects as ui_clear_recent_projects,
@@ -76,11 +82,13 @@ from yima.editor_search_flow import (
 )
 from yima.editor_shortcuts_flow import (
     bind_global_shortcuts as ui_bind_global_shortcuts,
+    shortcut_cheatsheet as ui_shortcut_cheatsheet,
     shortcut_find as ui_shortcut_find,
     shortcut_multi_add_next as ui_shortcut_multi_add_next,
     shortcut_multi_select_all as ui_shortcut_multi_select_all,
     shortcut_new as ui_shortcut_new,
     shortcut_open as ui_shortcut_open,
+    shortcut_quick_view as ui_shortcut_quick_view,
     shortcut_rename_symbol as ui_shortcut_rename_symbol,
     shortcut_replace as ui_shortcut_replace,
     shortcut_run as ui_shortcut_run,
@@ -101,6 +109,7 @@ from yima.editor_feedback_flow import (
     on_issue_activate as ui_on_issue_activate,
     run_live_diagnose as ui_run_live_diagnose,
     refresh_issue_list as ui_refresh_issue_list,
+    refresh_quick_view as ui_refresh_quick_view,
     schedule_diagnose as ui_schedule_diagnose,
     semantic_analyze as ui_semantic_analyze,
     semantic_locate_yima_module as ui_semantic_locate_yima_module,
@@ -110,9 +119,11 @@ from yima.editor_feedback_flow import (
     semantic_read_module_exports as ui_semantic_read_module_exports,
     set_diagnostic_status as ui_set_diagnostic_status,
     set_issue_detail_text as ui_set_issue_detail_text,
+    set_quick_view_text as ui_set_quick_view_text,
     truncate_issue_message as ui_truncate_issue_message,
     update_cursor_status as ui_update_cursor_status,
     update_issue_detail_wrap as ui_update_issue_detail_wrap,
+    update_quick_view_wrap as ui_update_quick_view_wrap,
     update_status_main as ui_update_status_main,
 )
 from yima.editor_export_flow import export_exe as ui_export_exe
@@ -223,6 +234,16 @@ from yima.editor_logic_core import (
     resolve_export_entry as core_resolve_export_entry,
     sanitize_export_name as core_sanitize_export_name,
 )
+from yima.editor_cheatsheet_flow import (
+    insert_selected_cheatsheet_pattern as ui_insert_selected_cheatsheet_pattern,
+    on_cheatsheet_quick_query_changed as ui_on_cheatsheet_quick_query_changed,
+    on_cheatsheet_quick_select as ui_on_cheatsheet_quick_select,
+    open_cheatsheet as ui_open_cheatsheet,
+    open_cheatsheet_from_quick as ui_open_cheatsheet_from_quick,
+    refresh_cheatsheet as ui_refresh_cheatsheet,
+    refresh_cheatsheet_quick_panel as ui_refresh_cheatsheet_quick_panel,
+    setup_cheatsheet_quick_section as ui_setup_cheatsheet_quick_section,
+)
 
 class 易码IDE:
     def __init__(self, root):
@@ -242,6 +263,18 @@ class 易码IDE:
 
     def setup_ui(self):
         return ui_setup_ui(self)
+
+    def _mark_feedback_tab(self, tab_key, active=True):
+        return ui_mark_feedback_tab(self, tab_key, active=active)
+
+    def _clear_feedback_tab(self, tab_key=None):
+        return ui_clear_feedback_tab(self, tab_key=tab_key)
+
+    def _refresh_feedback_tab_badges(self):
+        return ui_refresh_feedback_tab_badges(self)
+
+    def _on_feedback_tab_changed(self, event=None):
+        return ui_on_feedback_tab_changed(self, event=event)
 
     def setup_tags(self, editor=None):
         return ui_setup_tags(self, editor=editor)
@@ -290,8 +323,14 @@ class 易码IDE:
     def _set_issue_detail_text(self, text):
         return ui_set_issue_detail_text(self, text)
 
+    def _set_quick_view_text(self, text):
+        return ui_set_quick_view_text(self, text)
+
     def _refresh_issue_list(self):
         return ui_refresh_issue_list(self)
+
+    def _refresh_quick_view(self, event=None):
+        return ui_refresh_quick_view(self, event=event)
 
     def _get_selected_issue_item(self):
         return ui_get_selected_issue_item(self)
@@ -307,6 +346,9 @@ class 易码IDE:
 
     def _update_cursor_status(self, event=None):
         return ui_update_cursor_status(self, event=event)
+
+    def _update_quick_view_wrap(self, event=None):
+        return ui_update_quick_view_wrap(self, event=event)
 
     def _on_editor_modified(self, event):
         return ui_on_editor_modified(self, event)
@@ -605,6 +647,9 @@ class 易码IDE:
     def _shortcut_new(self, event=None):
         return ui_shortcut_new(self, event=event)
 
+    def _shortcut_cheatsheet(self, event=None):
+        return ui_shortcut_cheatsheet(self, event=event)
+
     def _shortcut_run(self, event=None):
         return ui_shortcut_run(self, event=event)
 
@@ -622,6 +667,9 @@ class 易码IDE:
 
     def _shortcut_rename_symbol(self, event=None):
         return ui_shortcut_rename_symbol(self, event=event)
+
+    def _shortcut_quick_view(self, event=None):
+        return ui_shortcut_quick_view(self, event=event)
 
     def _shortcut_toggle_fold(self, event=None):
         return ui_shortcut_toggle_fold(self, event=event)
@@ -787,6 +835,30 @@ class 易码IDE:
 
     def new_project(self):
         return ui_new_project(self)
+
+    def _setup_cheatsheet_quick_section(self, sidebar_frame, create_tool_btn):
+        return ui_setup_cheatsheet_quick_section(self, sidebar_frame, create_tool_btn)
+
+    def _refresh_cheatsheet_quick_panel(self, event=None):
+        return ui_refresh_cheatsheet_quick_panel(self, event=event)
+
+    def _on_cheatsheet_quick_query_changed(self, event=None):
+        return ui_on_cheatsheet_quick_query_changed(self, event=event)
+
+    def _on_cheatsheet_quick_select(self, event=None):
+        return ui_on_cheatsheet_quick_select(self, event=event)
+
+    def _insert_selected_cheatsheet_pattern(self, event=None):
+        return ui_insert_selected_cheatsheet_pattern(self, event=event)
+
+    def _open_cheatsheet_from_quick(self, event=None):
+        return ui_open_cheatsheet_from_quick(self, event=event)
+
+    def open_cheatsheet(self, event=None):
+        return ui_open_cheatsheet(self, event=event)
+
+    def _refresh_cheatsheet(self, event=None):
+        return ui_refresh_cheatsheet(self, event=event)
 
     def _sanitize_export_name(self, 名称):
         return core_sanitize_export_name(名称)

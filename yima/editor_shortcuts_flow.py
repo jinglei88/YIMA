@@ -18,6 +18,9 @@ def bind_global_shortcuts(owner):
     owner.root.bind("<Control-s>", owner._shortcut_save)
     owner.root.bind("<Control-o>", owner._shortcut_open)
     owner.root.bind("<Control-n>", owner._shortcut_new)
+    owner.root.bind("<F1>", owner._shortcut_cheatsheet)
+    owner.root.bind("<Control-Shift-K>", owner._shortcut_cheatsheet)
+    owner.root.bind("<Control-Shift-k>", owner._shortcut_cheatsheet)
     owner.root.bind("<F5>", owner._shortcut_run)
     owner.root.bind("<Control-d>", owner._shortcut_multi_add_next)
     owner.root.bind("<Control-D>", owner._shortcut_multi_add_next)
@@ -27,6 +30,8 @@ def bind_global_shortcuts(owner):
     owner.root.bind("<Control-h>", owner._shortcut_replace)
     owner.root.bind("<Control-Shift-R>", owner._shortcut_rename_symbol)
     owner.root.bind("<Control-Shift-r>", owner._shortcut_rename_symbol)
+    owner.root.bind("<Control-Shift-Q>", owner._shortcut_quick_view)
+    owner.root.bind("<Control-Shift-q>", owner._shortcut_quick_view)
     owner.root.bind("<Alt-f>", owner._shortcut_toggle_fold)
     owner.root.bind("<Alt-u>", owner._shortcut_unfold_all)
 
@@ -44,6 +49,10 @@ def shortcut_open(owner, event=None):
 def shortcut_new(owner, event=None):
     owner.clear_code()
     return "break"
+
+
+def shortcut_cheatsheet(owner, event=None):
+    return owner.open_cheatsheet(event)
 
 
 def shortcut_run(owner, event=None):
@@ -71,6 +80,12 @@ def shortcut_replace(owner, event=None):
 
 def shortcut_rename_symbol(owner, event=None):
     return owner.rename_symbol(event)
+
+
+def shortcut_quick_view(owner, event=None):
+    owner._refresh_quick_view()
+    owner.status_main_var.set("快速查看已刷新")
+    return "break"
 
 
 def shortcut_toggle_fold(owner, event=None):

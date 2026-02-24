@@ -36,6 +36,8 @@ def print_output(owner, text, is_error=False):
             owner.output.insert(tk.END, content + "\n")
         owner.output.see(tk.END)
         owner.output.config(state=tk.DISABLED)
+        if hasattr(owner, "_mark_feedback_tab"):
+            owner._mark_feedback_tab("console", active=True)
     except tk.TclError:
         pass
 
@@ -55,6 +57,8 @@ def clear_output_console(owner, keep_intro=True):
         owner.output.config(state=tk.DISABLED)
     except tk.TclError:
         return
+    if hasattr(owner, "_clear_feedback_tab"):
+        owner._clear_feedback_tab("console")
     if keep_intro:
         write_output_console_intro(owner)
 
@@ -201,6 +205,8 @@ def run_code(owner):
         output_str = sys.stdout.getvalue()
         if not output_str.strip():
             output_str = "代码已执行完成，但没有输出。可使用【显示】语句输出结果。"
+    except KeyboardInterrupt:
+        output_str = "⚠️ 运行被中断（KeyboardInterrupt）。"
     except UserCancelledInput:
         output_str = "⚠️ 你已取消输入，本次运行已停止。"
     except Exception as e:

@@ -1074,7 +1074,21 @@ class 解释器:
             return getattr(窗口或容器, "_易码滚动内容框", 窗口或容器)
         
         def _创建窗口(标题="易码程序", 宽=400, 高=300):
-            窗口 = tk.Tk()
+            现有根窗口 = getattr(tk, "_default_root", None)
+            已有根窗口可用 = False
+            if 现有根窗口 is not None:
+                try:
+                    已有根窗口可用 = bool(现有根窗口.winfo_exists())
+                except Exception:
+                    已有根窗口可用 = False
+
+            嵌入IDE模式 = bool(getattr(现有根窗口, "_易码IDE根窗口", False))
+            if 嵌入IDE模式 and 已有根窗口可用:
+                窗口 = tk.Toplevel(现有根窗口)
+                窗口._易码嵌入窗口 = True
+            else:
+                窗口 = tk.Tk()
+                窗口._易码嵌入窗口 = False
             窗口.title(标题)
             窗口.geometry(f"{宽}x{高}")
             # 高清适配
@@ -1188,7 +1202,22 @@ class 解释器:
                     更新滚动()
                 except Exception:
                     pass
-            窗口.mainloop()
+            if bool(getattr(窗口, "_易码嵌入窗口", False)):
+                try:
+                    窗口.deiconify()
+                    窗口.lift()
+                    窗口.focus_force()
+                except Exception:
+                    pass
+                return 窗口
+            try:
+                窗口.mainloop()
+            except KeyboardInterrupt:
+                try:
+                    窗口.destroy()
+                except Exception:
+                    pass
+            return 窗口
 
         def _规范列名(列定义):
             if isinstance(列定义, (list, tuple)):

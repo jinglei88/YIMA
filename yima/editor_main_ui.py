@@ -18,6 +18,27 @@ import tkinter as tk
 from tkinter import scrolledtext, ttk
 
 
+def _build_feedback_dot_image(size=11, fill_color="#FF4D4F", border_color="#C83335"):
+    size = max(8, int(size))
+    img = tk.PhotoImage(width=size, height=size)
+    cx = (size - 1) / 2.0
+    cy = (size - 1) / 2.0
+    outer_radius = max(3.0, (size / 2.0) - 0.8)
+    inner_radius = max(2.0, outer_radius - 1.2)
+    outer_r2 = outer_radius * outer_radius
+    inner_r2 = inner_radius * inner_radius
+    for y in range(size):
+        for x in range(size):
+            dx = x - cx
+            dy = y - cy
+            dist2 = dx * dx + dy * dy
+            if dist2 <= inner_r2:
+                img.put(fill_color, (x, y))
+            elif dist2 <= outer_r2:
+                img.put(border_color, (x, y))
+    return img
+
+
 def setup_ui(self):
     # 顶部现代化菜单栏（分组 + 主按钮）
     toolbar_shell = tk.Frame(
@@ -188,6 +209,9 @@ def setup_ui(self):
         ("同词多光标", self.multi_cursor_add_next),
         ("重命名", self.rename_symbol),
     ])
+    create_tool_group("文档", [
+        ("速查表", self.open_cheatsheet),
+    ])
 
     tk.Frame(self.root, height=1, bg=self.theme_toolbar_border, bd=0).pack(fill=tk.X)
 
@@ -203,22 +227,24 @@ def setup_ui(self):
     sidebar_header.pack(fill=tk.X)
     title_wrap = tk.Frame(sidebar_header, bg=self.theme_sidebar_bg)
     title_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    title_line = tk.Frame(title_wrap, bg=self.theme_sidebar_bg)
+    title_line.pack(fill=tk.X)
     tk.Label(
-        title_wrap,
+        title_line,
         text="资源管理器",
         font=("Microsoft YaHei", 10, "bold"),
         bg=self.theme_sidebar_bg,
         fg="#E7EDF7",
         anchor="w",
-    ).pack(anchor="w")
+    ).pack(side=tk.LEFT)
     tk.Label(
-        title_wrap,
+        title_line,
         text="EXPLORER",
         font=("Microsoft YaHei", 8),
         bg=self.theme_sidebar_bg,
         fg="#8FA1B8",
         anchor="w",
-    ).pack(anchor="w")
+    ).pack(side=tk.LEFT, padx=(6, 0))
     create_tool_btn(
         sidebar_header,
         "刷新",
@@ -299,7 +325,7 @@ def setup_ui(self):
 
     self.outline_listbox = tk.Listbox(
         outline_container,
-        height=9,
+        height=6,
         font=self.font_ui,
         bg=self.theme_panel_inner_bg,
         fg=self.theme_fg,
@@ -319,96 +345,8 @@ def setup_ui(self):
     self.outline_listbox.bind("<Return>", self.on_outline_activate)
     self.outline_listbox.bind("<ButtonRelease-1>", self._outline_update_status)
 
-    # 语法/语义问题区（可点击跳转）
-    issue_section = tk.Frame(
-        sidebar_frame,
-        bg=self.theme_panel_bg,
-        highlightthickness=1,
-        highlightbackground=self.theme_toolbar_border,
-        highlightcolor=self.theme_toolbar_border,
-        bd=0,
-    )
-    issue_section.pack(fill=tk.X, padx=8, pady=(0, 10))
-    issue_top = tk.Frame(issue_section, bg=self.theme_panel_bg, padx=8, pady=6)
-    issue_top.pack(fill=tk.X)
-
-    tk.Label(
-        issue_top,
-        text="问题列表 ISSUES",
-        font=("Microsoft YaHei", 8, "bold"),
-        bg=self.theme_panel_bg,
-        fg="#8FA1B8",
-        anchor="w",
-    ).pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-    self.issue_count_var = tk.StringVar(value="0")
-    tk.Label(
-        issue_top,
-        textvariable=self.issue_count_var,
-        font=("Microsoft YaHei", 8, "bold"),
-        bg=self.theme_panel_inner_bg,
-        fg="#9FCBFF",
-        padx=8,
-        pady=1,
-        anchor="e",
-    ).pack(side=tk.RIGHT)
-
-    issue_container = tk.Frame(issue_section, bg=self.theme_panel_bg, padx=8)
-    issue_container.pack(fill=tk.X, pady=(0, 8))
-
-    self.issue_listbox = tk.Listbox(
-        issue_container,
-        height=7,
-        font=self.font_ui,
-        bg=self.theme_panel_inner_bg,
-        fg=self.theme_fg,
-        selectbackground=self.theme_accent,
-        selectforeground="#FFFFFF",
-        borderwidth=0,
-        highlightthickness=0,
-        relief="flat",
-    )
-    issue_vsb = ttk.Scrollbar(issue_container, orient="vertical", command=self.issue_listbox.yview)
-    issue_hsb = ttk.Scrollbar(issue_container, orient="horizontal", command=self.issue_listbox.xview)
-    self.issue_listbox.configure(yscrollcommand=issue_vsb.set, xscrollcommand=issue_hsb.set)
-
-    self.issue_listbox.grid(column=0, row=0, sticky="nsew")
-    issue_vsb.grid(column=1, row=0, sticky="ns")
-    issue_hsb.grid(column=0, row=1, sticky="ew")
-    issue_container.grid_columnconfigure(0, weight=1)
-    issue_container.grid_rowconfigure(0, weight=1)
-
-    self.issue_listbox.bind("<Double-Button-1>", self.on_issue_activate)
-    self.issue_listbox.bind("<Return>", self.on_issue_activate)
-    self.issue_listbox.bind("<ButtonRelease-1>", self._issue_update_status)
-    self.issue_listbox.bind("<<ListboxSelect>>", self._issue_update_status, add="+")
-
-    issue_detail_box = tk.Frame(issue_section, bg=self.theme_panel_bg, padx=8)
-    issue_detail_box.pack(fill=tk.X, pady=(0, 8))
-    tk.Label(
-        issue_detail_box,
-        text="问题详情",
-        font=("Microsoft YaHei", 8, "bold"),
-        bg=self.theme_panel_bg,
-        fg="#8FA1B8",
-        anchor="w",
-    ).pack(fill=tk.X, pady=(0, 4))
-
-    self.issue_detail_var = tk.StringVar(value="（当前文件无语法/语义问题）")
-    self.issue_detail_label = tk.Label(
-        issue_detail_box,
-        textvariable=self.issue_detail_var,
-        font=("Microsoft YaHei", 8),
-        bg=self.theme_panel_inner_bg,
-        fg="#9FB0C5",
-        anchor="nw",
-        justify="left",
-        padx=8,
-        pady=6,
-        wraplength=220,
-    )
-    self.issue_detail_label.pack(fill=tk.X)
-    self.issue_detail_label.bind("<Configure>", self._update_issue_detail_wrap, add="+")
+    # 速查卡：从速查表提炼高频写法，支持筛选和一键插入
+    self._setup_cheatsheet_quick_section(sidebar_frame, create_tool_btn)
     
     # 初始给左侧多分配一点空间，防止文字被遮挡
     sidebar_default_width = int(250 * self.dpi_scale)
@@ -444,7 +382,7 @@ def setup_ui(self):
     
     self.right_paned.add(editor_frame, stretch="always", minsize=400)
     
-    # 输出区
+    # 底部反馈区（控制台 / 问题 / 提示）
     output_frame = tk.Frame(
         self.right_paned,
         bg=self.theme_bg,
@@ -453,9 +391,38 @@ def setup_ui(self):
         highlightcolor=self.theme_toolbar_border,
         bd=0,
     )
-    
-    # 输出区顶栏
-    out_top = tk.Frame(output_frame, bg=self.theme_panel_bg, padx=2, pady=1)
+
+    self.feedback_notebook = ttk.Notebook(output_frame, padding=0)
+    self.feedback_notebook.pack(fill=tk.BOTH, expand=True)
+
+    # 反馈页签右上角操作区：利用页签右侧空白，按当前页签展示操作
+    self.feedback_action_bar = tk.Frame(output_frame, bg=self.theme_bg)
+    self.feedback_action_bar.place(relx=1.0, x=-8, y=4, anchor="ne")
+    self.feedback_action_hint_var = tk.StringVar(value="")
+    self.feedback_action_hint = tk.Label(
+        self.feedback_action_bar,
+        textvariable=self.feedback_action_hint_var,
+        font=("Microsoft YaHei", 8),
+        bg=self.theme_bg,
+        fg="#8FA1B8",
+        anchor="e",
+    )
+    self.feedback_action_hint.pack(side=tk.RIGHT)
+    self.feedback_action_btn = create_tool_btn(
+        self.feedback_action_bar,
+        text="",
+        cmd=lambda: None,
+        variant="subtle",
+        compact=True,
+        font=("Microsoft YaHei", 8),
+    )
+    self.feedback_action_btn.pack(side=tk.RIGHT, padx=(0, 6))
+
+    # 控制台页
+    console_tab = tk.Frame(self.feedback_notebook, bg=self.theme_bg, borderwidth=0)
+    self.feedback_notebook.add(console_tab, text=" 控制台 ")
+
+    out_top = tk.Frame(console_tab, bg=self.theme_panel_bg, padx=2, pady=1)
     out_top.pack(fill=tk.X)
     tk.Label(
         out_top,
@@ -476,21 +443,167 @@ def setup_ui(self):
         anchor="w",
         padx=8,
     ).pack(side=tk.LEFT)
-    清空按钮 = create_tool_btn(
-        out_top,
-        text="清空",
-        cmd=self._clear_output_console,
-        variant="subtle",
-        compact=True,
-        font=("Microsoft YaHei", 8, "bold"),
-    )
-    清空按钮.pack(side=tk.RIGHT, padx=(0, 8))
-    
+
     terminal_font = ("Consolas" if sys.platform == "win32" else "Courier New", 11)
-    self.output = scrolledtext.ScrolledText(output_frame, font=terminal_font, height=9, bg=self.theme_bg, fg="#A8C7FA", state=tk.DISABLED, padx=15, pady=5, spacing1=3, borderwidth=0, relief="flat", highlightthickness=0, insertbackground="#CCCCCC")
+    self.output = scrolledtext.ScrolledText(
+        console_tab,
+        font=terminal_font,
+        height=9,
+        bg=self.theme_bg,
+        fg="#A8C7FA",
+        state=tk.DISABLED,
+        padx=15,
+        pady=5,
+        spacing1=3,
+        borderwidth=0,
+        relief="flat",
+        highlightthickness=0,
+        insertbackground="#CCCCCC",
+    )
     self.output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    self._style_scrolledtext_vbar(self.output, parent=output_frame)
-    self.right_paned.add(output_frame, stretch="never", minsize=120)
+    self._style_scrolledtext_vbar(self.output, parent=console_tab)
+
+    # 问题页（原左侧问题列表 + 详情）
+    issue_tab = tk.Frame(self.feedback_notebook, bg=self.theme_panel_bg, borderwidth=0)
+    self.feedback_notebook.add(issue_tab, text=" 问题 ")
+
+    issue_top = tk.Frame(issue_tab, bg=self.theme_panel_bg, padx=8, pady=6)
+    issue_top.pack(fill=tk.X)
+    tk.Label(
+        issue_top,
+        text="问题列表 ISSUES",
+        font=("Microsoft YaHei", 8, "bold"),
+        bg=self.theme_panel_bg,
+        fg="#8FA1B8",
+        anchor="w",
+    ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    self.issue_count_var = tk.StringVar(value="0")
+    tk.Label(
+        issue_top,
+        textvariable=self.issue_count_var,
+        font=("Microsoft YaHei", 8, "bold"),
+        bg=self.theme_panel_inner_bg,
+        fg="#9FCBFF",
+        padx=8,
+        pady=1,
+        anchor="e",
+    ).pack(side=tk.RIGHT)
+
+    issue_container = tk.Frame(issue_tab, bg=self.theme_panel_bg, padx=8)
+    issue_container.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+    self.issue_listbox = tk.Listbox(
+        issue_container,
+        height=8,
+        font=self.font_ui,
+        bg=self.theme_panel_inner_bg,
+        fg=self.theme_fg,
+        selectbackground=self.theme_accent,
+        selectforeground="#FFFFFF",
+        borderwidth=0,
+        highlightthickness=0,
+        relief="flat",
+    )
+    issue_vsb = ttk.Scrollbar(issue_container, orient="vertical", command=self.issue_listbox.yview)
+    issue_hsb = ttk.Scrollbar(issue_container, orient="horizontal", command=self.issue_listbox.xview)
+    self.issue_listbox.configure(yscrollcommand=issue_vsb.set, xscrollcommand=issue_hsb.set)
+    self.issue_listbox.grid(column=0, row=0, sticky="nsew")
+    issue_vsb.grid(column=1, row=0, sticky="ns")
+    issue_hsb.grid(column=0, row=1, sticky="ew")
+    issue_container.grid_columnconfigure(0, weight=1)
+    issue_container.grid_rowconfigure(0, weight=1)
+
+    self.issue_listbox.bind("<Double-Button-1>", self.on_issue_activate)
+    self.issue_listbox.bind("<Return>", self.on_issue_activate)
+    self.issue_listbox.bind("<ButtonRelease-1>", self._issue_update_status)
+    self.issue_listbox.bind("<<ListboxSelect>>", self._issue_update_status, add="+")
+
+    issue_detail_box = tk.Frame(issue_tab, bg=self.theme_panel_bg, padx=8)
+    issue_detail_box.pack(fill=tk.X, pady=(0, 8))
+    tk.Label(
+        issue_detail_box,
+        text="问题详情",
+        font=("Microsoft YaHei", 8, "bold"),
+        bg=self.theme_panel_bg,
+        fg="#8FA1B8",
+        anchor="w",
+    ).pack(fill=tk.X, pady=(0, 4))
+    self.issue_detail_var = tk.StringVar(value="（当前文件无语法/语义问题）")
+    self.issue_detail_label = tk.Label(
+        issue_detail_box,
+        textvariable=self.issue_detail_var,
+        font=("Microsoft YaHei", 8),
+        bg=self.theme_panel_inner_bg,
+        fg="#9FB0C5",
+        anchor="nw",
+        justify="left",
+        padx=8,
+        pady=6,
+        wraplength=420,
+    )
+    self.issue_detail_label.pack(fill=tk.X)
+    self.issue_detail_label.bind("<Configure>", self._update_issue_detail_wrap, add="+")
+
+    # 提示页（原左侧快速查看）
+    quick_tab = tk.Frame(self.feedback_notebook, bg=self.theme_panel_bg, borderwidth=0)
+    self.feedback_notebook.add(quick_tab, text=" 提示 ")
+
+    quick_top = tk.Frame(quick_tab, bg=self.theme_panel_bg, padx=8, pady=6)
+    quick_top.pack(fill=tk.X)
+    tk.Label(
+        quick_top,
+        text="快速查看 QUICK VIEW",
+        font=("Microsoft YaHei", 8, "bold"),
+        bg=self.theme_panel_bg,
+        fg="#8FA1B8",
+        anchor="w",
+    ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    quick_detail_box = tk.Frame(quick_tab, bg=self.theme_panel_bg, padx=8, pady=0)
+    quick_detail_box.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+    self.quick_view_var = tk.StringVar(value="（把光标放到代码中可快速查看）")
+    self.quick_view_label = tk.Label(
+        quick_detail_box,
+        textvariable=self.quick_view_var,
+        font=("Microsoft YaHei", 8),
+        bg=self.theme_panel_inner_bg,
+        fg="#9FB0C5",
+        anchor="nw",
+        justify="left",
+        padx=8,
+        pady=8,
+        wraplength=420,
+    )
+    self.quick_view_label.pack(fill=tk.BOTH, expand=True)
+    self.quick_view_label.bind("<Configure>", self._update_quick_view_wrap, add="+")
+
+    self._feedback_tab_base_text = {
+        "console": "控制台",
+        "issue": "问题",
+        "quick": "提示",
+    }
+    self._feedback_tab_widgets = {
+        "console": console_tab,
+        "issue": issue_tab,
+        "quick": quick_tab,
+    }
+    self._feedback_tab_unread = {
+        "console": False,
+        "issue": False,
+        "quick": False,
+    }
+    self._feedback_tab_red_dot = "•"
+    self._feedback_tab_dot_image = _build_feedback_dot_image(
+        size=max(10, int(11 * self.dpi_scale)),
+        fill_color="#FF4D4F",
+        border_color="#D23537",
+    )
+    self.feedback_notebook.bind("<<NotebookTabChanged>>", self._on_feedback_tab_changed, add="+")
+
+    self.right_paned.add(output_frame, stretch="never", minsize=160)
+    self.feedback_notebook.select(console_tab)
+    self._refresh_feedback_tab_badges()
+    update_feedback_action_bar(self)
     self._clear_output_console(keep_intro=True)
 
     # 底部状态栏（当前文件 / 语法诊断 / 光标位置）
@@ -620,3 +733,103 @@ def setup_ui(self):
     if not self._try_restore_last_project():
         self.refresh_file_tree()
         self._create_editor_tab("未命名代码.ym")
+    self._refresh_quick_view()
+
+
+def _feedback_selected_key(owner):
+    notebook = getattr(owner, "feedback_notebook", None)
+    tab_widgets = getattr(owner, "_feedback_tab_widgets", {}) or {}
+    if notebook is None or not tab_widgets:
+        return None
+    try:
+        selected = str(notebook.select())
+    except tk.TclError:
+        return None
+    for key, widget in tab_widgets.items():
+        if str(widget) == selected:
+            return key
+    return None
+
+
+def update_feedback_action_bar(owner):
+    action_btn = getattr(owner, "feedback_action_btn", None)
+    hint_var = getattr(owner, "feedback_action_hint_var", None)
+    if action_btn is None or hint_var is None:
+        return
+    current = _feedback_selected_key(owner)
+
+    try:
+        if current == "console":
+            action_btn.configure(text="清空", command=owner._clear_output_console, state=tk.NORMAL)
+            hint_var.set("调试日志")
+        elif current == "issue":
+            action_btn.configure(text="定位下一个", command=owner.jump_to_diagnostic, state=tk.NORMAL)
+            count_var = getattr(owner, "issue_count_var", None)
+            count_text = str(count_var.get()) if count_var is not None else "0"
+            hint_var.set(f"问题 {count_text}")
+        elif current == "quick":
+            action_btn.configure(text="刷新", command=owner._refresh_quick_view, state=tk.NORMAL)
+            hint_var.set("快速查看")
+        else:
+            action_btn.configure(text="", command=lambda: None, state=tk.DISABLED)
+            hint_var.set("")
+    except tk.TclError:
+        pass
+
+
+def refresh_feedback_tab_badges(owner):
+    notebook = getattr(owner, "feedback_notebook", None)
+    tab_widgets = getattr(owner, "_feedback_tab_widgets", {}) or {}
+    base_text = getattr(owner, "_feedback_tab_base_text", {}) or {}
+    unread = getattr(owner, "_feedback_tab_unread", {}) or {}
+    if notebook is None or not tab_widgets or not base_text or not unread:
+        return
+
+    current = _feedback_selected_key(owner)
+
+    dot = str(getattr(owner, "_feedback_tab_red_dot", "•") or "•")
+    dot_image = getattr(owner, "_feedback_tab_dot_image", None)
+    for key, title in base_text.items():
+        widget = tab_widgets.get(key)
+        if widget is None:
+            continue
+        show_dot = bool(unread.get(key)) and key != current
+        try:
+            if show_dot and dot_image is not None:
+                notebook.tab(widget, text=f" {title} ", image=dot_image, compound=tk.LEFT)
+            elif show_dot:
+                notebook.tab(widget, text=f" {dot} {title} ", image="", compound=tk.NONE)
+            else:
+                notebook.tab(widget, text=f" {title} ", image="", compound=tk.NONE)
+        except tk.TclError:
+            pass
+    update_feedback_action_bar(owner)
+
+
+def mark_feedback_tab(owner, tab_key, active=True):
+    unread = getattr(owner, "_feedback_tab_unread", None)
+    if not isinstance(unread, dict) or tab_key not in unread:
+        return
+    if not active:
+        unread[tab_key] = False
+        refresh_feedback_tab_badges(owner)
+        return
+    unread[tab_key] = True
+    refresh_feedback_tab_badges(owner)
+
+
+def clear_feedback_tab(owner, tab_key=None):
+    unread = getattr(owner, "_feedback_tab_unread", None)
+    if not isinstance(unread, dict):
+        return
+    if tab_key is None:
+        for key in list(unread.keys()):
+            unread[key] = False
+    elif tab_key in unread:
+        unread[tab_key] = False
+    refresh_feedback_tab_badges(owner)
+
+
+def on_feedback_tab_changed(owner, event=None):
+    del event
+    refresh_feedback_tab_badges(owner)

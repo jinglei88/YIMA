@@ -146,6 +146,7 @@ def refresh_outline(owner):
             owner.outline_listbox.itemconfig(0, foreground="#777777")
         except tk.TclError:
             pass
+        owner._refresh_quick_view()
         return
 
     selected_idx = 0
@@ -158,6 +159,7 @@ def refresh_outline(owner):
     owner.outline_listbox.selection_set(selected_idx)
     owner.outline_listbox.activate(selected_idx)
     owner.tabs_data[tab_id]["outline_focus_line"] = items[selected_idx].get("line")
+    owner._refresh_quick_view()
 
 
 def get_selected_outline_item(owner):
