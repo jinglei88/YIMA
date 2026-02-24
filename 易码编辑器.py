@@ -22,6 +22,7 @@ from yima.editor_main_ui import (
     on_feedback_tab_changed as ui_on_feedback_tab_changed,
     refresh_feedback_tab_badges as ui_refresh_feedback_tab_badges,
     setup_ui as ui_setup_ui,
+    switch_workspace_mode as ui_switch_workspace_mode,
 )
 from yima.editor_project_flow import (
     clear_code as ui_clear_code,
@@ -248,6 +249,7 @@ from yima.editor_cheatsheet_flow import (
     setup_cheatsheet_quick_section as ui_setup_cheatsheet_quick_section,
 )
 from yima.editor_examples_flow import open_examples as ui_open_examples
+from yima.editor_ui_designer_flow import open_ui_designer as ui_open_ui_designer
 
 class 易码IDE:
     def __init__(self, root):
@@ -267,6 +269,9 @@ class 易码IDE:
 
     def setup_ui(self):
         return ui_setup_ui(self)
+
+    def _switch_workspace_mode(self, mode="code"):
+        return ui_switch_workspace_mode(self, mode=mode)
 
     def _mark_feedback_tab(self, tab_key, active=True):
         return ui_mark_feedback_tab(self, tab_key, active=active)
@@ -872,6 +877,9 @@ class 易码IDE:
 
     def open_examples(self, event=None):
         return ui_open_examples(self, event=event)
+
+    def open_ui_designer(self, event=None):
+        return ui_open_ui_designer(self, event=event)
 
     def _refresh_cheatsheet(self, event=None):
         return ui_refresh_cheatsheet(self, event=event)

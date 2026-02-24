@@ -62,6 +62,12 @@ def initialize_editor(owner, root):
     self._examples_window = None
     self._examples_items_all = []
     self._examples_items_visible = []
+    self._ui_designer_window = None
+    self._ui_designer_embedded_panel = None
+    self._ui_designer_components = []
+    self._ui_designer_next_uid = 1
+    self._ui_designer_selected_uid = None
+    self._ui_designer_drag = {"uid": None, "start_x": 0, "start_y": 0}
     self.find_dialog = None
     self.find_var = tk.StringVar(value="")
     self.replace_var = tk.StringVar(value="")

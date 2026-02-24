@@ -144,7 +144,8 @@ class 解释器:
             "网络请求": ["发起请求", "发GET", "发POST", "发GET_JSON", "发POST_JSON", "读响应JSON"],
             "本地数据库": ["打开数据库", "执行SQL", "查询SQL", "关闭数据库", "开始事务", "提交事务", "回滚事务"],
             "图形界面": [
-                "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面",
+                "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "加卡片", "加双列", "加登录模板", "加列表模板",
+                "设位置", "弹窗", "弹窗输入", "打开界面",
                 "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
             ],
             "画板": [
@@ -1037,7 +1038,8 @@ class 解释器:
         from .错误 import 运行报错
 
         图形能力名 = [
-            "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "弹窗", "弹窗输入", "打开界面",
+            "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "加卡片", "加双列", "加登录模板", "加列表模板",
+            "设位置", "弹窗", "弹窗输入", "打开界面",
             "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
         ]
 
@@ -1070,6 +1072,58 @@ class 解释器:
             # 其中一种可能失效，做双通道兜底。
             from tkinter import ttk
 
+        界面主题_简洁浅色 = {
+            "窗口背景": "#EEF3FA",
+            "内容背景": "#F8FBFF",
+            "文字颜色": "#1E2A3B",
+            "次级文字": "#5C6E83",
+            "输入背景": "#FFFFFF",
+            "输入文字": "#1E2A3B",
+            "边框颜色": "#C8D5E6",
+            "强调色": "#2F7FE3",
+            "强调悬停色": "#266BC0",
+            "按钮文字": "#FFFFFF",
+            "表格标题背景": "#E9F1FB",
+            "表格标题文字": "#203048",
+            "表格背景": "#FFFFFF",
+            "表格文字": "#1E2A3B",
+            "表格选中背景": "#2F7FE3",
+            "表格选中文字": "#FFFFFF",
+        }
+        界面主题_专业深色 = {
+            "窗口背景": "#111827",
+            "内容背景": "#162033",
+            "文字颜色": "#E6EDF7",
+            "次级文字": "#9AA9BE",
+            "输入背景": "#0F1726",
+            "输入文字": "#E6EDF7",
+            "边框颜色": "#2A3B57",
+            "强调色": "#2F7FE3",
+            "强调悬停色": "#266BC0",
+            "按钮文字": "#FFFFFF",
+            "表格标题背景": "#1A2A43",
+            "表格标题文字": "#DCE8F7",
+            "表格背景": "#101A2C",
+            "表格文字": "#E6EDF7",
+            "表格选中背景": "#2F7FE3",
+            "表格选中文字": "#FFFFFF",
+        }
+
+        def _解析界面主题(主题名):
+            文本 = str(主题名 or "").strip().lower()
+            if 文本 in {"深色", "暗色", "夜间", "dark", "专业深色", "dark-pro"}:
+                return dict(界面主题_专业深色)
+            return dict(界面主题_简洁浅色)
+
+        def _取界面主题(窗口或容器):
+            当前 = 窗口或容器
+            while 当前 is not None:
+                主题 = getattr(当前, "_易码界面主题", None)
+                if isinstance(主题, dict):
+                    return 主题
+                当前 = getattr(当前, "master", None)
+            return 界面主题_简洁浅色
+
         def _取挂载容器(窗口或容器):
             return getattr(窗口或容器, "_易码滚动内容框", 窗口或容器)
         
@@ -1091,6 +1145,10 @@ class 解释器:
                 窗口._易码嵌入窗口 = False
             窗口.title(标题)
             窗口.geometry(f"{宽}x{高}")
+            try:
+                窗口.minsize(max(360, int(宽 * 0.75)), max(260, int(高 * 0.75)))
+            except Exception:
+                pass
             # 高清适配
             try:
                 from ctypes import windll
@@ -1098,18 +1156,32 @@ class 解释器:
             except Exception:
                 pass
 
+            默认主题名 = os.environ.get("YIMA_GUI_THEME", "简洁浅色")
+            主题 = _解析界面主题(默认主题名)
+            窗口._易码界面主题 = 主题
+            try:
+                窗口.configure(bg=主题["窗口背景"])
+            except Exception:
+                pass
+
             # 为长表单默认启用垂直滚动容器：不改用户代码即可滚动查看底部内容。
-            主容器 = tk.Frame(窗口)
+            主容器 = tk.Frame(窗口, bg=主题["窗口背景"])
             主容器.pack(fill=tk.BOTH, expand=True)
 
-            滚动画布 = tk.Canvas(主容器, highlightthickness=0, borderwidth=0)
+            滚动画布 = tk.Canvas(
+                主容器,
+                highlightthickness=0,
+                borderwidth=0,
+                bg=主题["窗口背景"],
+                relief="flat",
+            )
             纵向滚动条 = ttk.Scrollbar(主容器, orient="vertical", command=滚动画布.yview)
             滚动画布.configure(yscrollcommand=纵向滚动条.set)
 
             滚动画布.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             纵向滚动条.pack(side=tk.RIGHT, fill=tk.Y)
 
-            内容框 = tk.Frame(滚动画布)
+            内容框 = tk.Frame(滚动画布, bg=主题["内容背景"], padx=16, pady=14)
             内容框窗口 = 滚动画布.create_window((0, 0), window=内容框, anchor="nw")
 
             def _更新滚动区域(_event=None):
@@ -1155,14 +1227,35 @@ class 解释器:
             
         def _加上文字(窗口, 内容):
             父容器 = _取挂载容器(窗口)
-            标签 = tk.Label(父容器, text=内容, font=("Microsoft YaHei", 12))
-            标签.pack(pady=5)
+            主题 = _取界面主题(窗口)
+            标签 = tk.Label(
+                父容器,
+                text=str(内容),
+                font=("Microsoft YaHei", 12),
+                bg=主题["内容背景"],
+                fg=主题["文字颜色"],
+                anchor="w",
+                justify="left",
+            )
+            标签.pack(fill=tk.X, pady=(2, 8))
             return 标签
             
         def _加上输入框(窗口):
             父容器 = _取挂载容器(窗口)
-            输入框 = tk.Entry(父容器, font=("Microsoft YaHei", 12))
-            输入框.pack(pady=5)
+            主题 = _取界面主题(窗口)
+            输入框 = tk.Entry(
+                父容器,
+                font=("Microsoft YaHei", 12),
+                bg=主题["输入背景"],
+                fg=主题["输入文字"],
+                insertbackground=主题["输入文字"],
+                relief="flat",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=主题["边框颜色"],
+                highlightcolor=主题["强调色"],
+            )
+            输入框.pack(fill=tk.X, pady=(2, 10), ipady=6)
             return 输入框
             
         def _读取输入(输入框):
@@ -1170,6 +1263,28 @@ class 解释器:
             
         def _修改文字(标签, 新内容):
             标签.config(text=新内容)
+
+        def _创建主题按钮(父容器, 主题, 文字, 回调=None, 锚点="w"):
+            按钮 = tk.Button(
+                父容器,
+                text=str(文字),
+                font=("Microsoft YaHei", 11, "bold"),
+                bg=主题["强调色"],
+                fg=主题["按钮文字"],
+                activebackground=主题["强调悬停色"],
+                activeforeground=主题["按钮文字"],
+                relief="flat",
+                bd=0,
+                highlightthickness=0,
+                padx=16,
+                pady=8,
+                cursor="hand2",
+                command=回调 if callable(回调) else (lambda: None),
+            )
+            按钮.pack(anchor=str(锚点 or "w"), pady=(2, 10))
+            按钮.bind("<Enter>", lambda _e: 按钮.configure(bg=主题["强调悬停色"]), add="+")
+            按钮.bind("<Leave>", lambda _e: 按钮.configure(bg=主题["强调色"]), add="+")
+            return 按钮
             
         def _加上按钮(窗口, 文字, 绑定的函数名, _易码环境=None):
             回调环境 = _易码环境 if _易码环境 is not None else self.全局环境
@@ -1183,10 +1298,190 @@ class 解释器:
                     messagebox.showerror("按钮执行失败", f"未找到目标函数或执行失败：{e}")
                     
             父容器 = _取挂载容器(窗口)
-            按钮 = tk.Button(父容器, text=文字, font=("Microsoft YaHei", 12), command=点击动作)
-            按钮.pack(pady=5)
-            return 按钮
+            主题 = _取界面主题(窗口)
+            return _创建主题按钮(父容器, 主题, 文字, 点击动作, 锚点="w")
         _加上按钮._易码需要环境 = True
+
+        def _转整数(值, 默认值=0):
+            try:
+                return int(float(值))
+            except Exception:
+                return int(默认值)
+
+        def _转整数并限制下界(值, 下界=1):
+            try:
+                整数值 = int(float(值))
+            except Exception:
+                整数值 = 下界
+            return max(int(下界), 整数值)
+
+        def _加上卡片(窗口或容器, 标题=""):
+            父容器 = _取挂载容器(窗口或容器)
+            主题 = _取界面主题(窗口或容器)
+
+            卡片 = tk.Frame(
+                父容器,
+                bg=主题["内容背景"],
+                highlightthickness=1,
+                highlightbackground=主题["边框颜色"],
+                highlightcolor=主题["边框颜色"],
+                bd=0,
+            )
+            卡片.pack(fill=tk.X, pady=(4, 10))
+
+            标题文本 = str(标题 or "").strip()
+            if 标题文本:
+                头部 = tk.Frame(卡片, bg=主题["内容背景"], padx=12, pady=10)
+                头部.pack(fill=tk.X)
+                tk.Label(
+                    头部,
+                    text=标题文本,
+                    font=("Microsoft YaHei", 11, "bold"),
+                    bg=主题["内容背景"],
+                    fg=主题["文字颜色"],
+                    anchor="w",
+                    justify="left",
+                ).pack(fill=tk.X)
+                tk.Frame(卡片, bg=主题["边框颜色"], height=1).pack(fill=tk.X, padx=10)
+
+            内容框 = tk.Frame(卡片, bg=主题["内容背景"], padx=12, pady=10)
+            内容框.pack(fill=tk.BOTH, expand=True)
+
+            卡片._易码滚动内容框 = 内容框
+            卡片._易码界面主题 = 主题
+            return 卡片
+
+        def _加上双列(窗口或容器, 左列比例=1, 右列比例=1):
+            父容器 = _取挂载容器(窗口或容器)
+            主题 = _取界面主题(窗口或容器)
+
+            双列容器 = tk.Frame(父容器, bg=主题["内容背景"])
+            双列容器.pack(fill=tk.X, pady=(2, 10))
+
+            左列 = tk.Frame(双列容器, bg=主题["内容背景"])
+            右列 = tk.Frame(双列容器, bg=主题["内容背景"])
+            左列.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+            右列.grid(row=0, column=1, sticky="nsew")
+
+            双列容器.grid_rowconfigure(0, weight=1)
+            双列容器.grid_columnconfigure(0, weight=_转整数并限制下界(左列比例))
+            双列容器.grid_columnconfigure(1, weight=_转整数并限制下界(右列比例))
+
+            左列._易码界面主题 = 主题
+            右列._易码界面主题 = 主题
+            return [左列, 右列]
+
+        def _加登录模板(窗口或容器, 标题="账号登录", 提交文案="登录", 提交函数名="", _易码环境=None):
+            回调环境 = _易码环境 if _易码环境 is not None else self.全局环境
+            卡片 = _加上卡片(窗口或容器, 标题)
+            双列 = _加上双列(卡片, 1, 2)
+            左列 = 双列[0]
+            右列 = 双列[1]
+
+            _加上文字(左列, "账号")
+            账号输入框 = _加上输入框(右列)
+            _加上文字(左列, "密码")
+            密码输入框 = _加上输入框(右列)
+            try:
+                密码输入框.configure(show="*")
+            except Exception:
+                pass
+
+            函数名 = str(提交函数名 or "").strip()
+
+            def 点击动作():
+                if not 函数名:
+                    return
+                try:
+                    from .语法树 import 函数调用节点
+                    虚拟调用 = 函数调用节点(函数名, [], 行号=0)
+                    self._做_函数调用节点(虚拟调用, 回调环境)
+                except Exception as e:
+                    messagebox.showerror("按钮执行失败", f"未找到目标函数或执行失败：{e}")
+
+            提交按钮 = _创建主题按钮(
+                _取挂载容器(卡片),
+                _取界面主题(卡片),
+                提交文案,
+                点击动作,
+                锚点="w",
+            )
+            return {
+                "卡片": 卡片,
+                "账号输入框": 账号输入框,
+                "密码输入框": 密码输入框,
+                "提交按钮": 提交按钮,
+            }
+        _加登录模板._易码需要环境 = True
+
+        def _加列表模板(窗口或容器, 标题="数据列表", 列定义="名称,说明", 高度=10, 查询文案="查询", 查询函数名="", _易码环境=None):
+            回调环境 = _易码环境 if _易码环境 is not None else self.全局环境
+            卡片 = _加上卡片(窗口或容器, 标题)
+            双列 = _加上双列(卡片, 3, 1)
+            左列 = 双列[0]
+            右列 = 双列[1]
+
+            _加上文字(左列, "关键字")
+            关键字输入框 = _加上输入框(左列)
+
+            函数名 = str(查询函数名 or "").strip()
+
+            def 点击动作():
+                if not 函数名:
+                    return
+                try:
+                    from .语法树 import 函数调用节点
+                    虚拟调用 = 函数调用节点(函数名, [], 行号=0)
+                    self._做_函数调用节点(虚拟调用, 回调环境)
+                except Exception as e:
+                    messagebox.showerror("按钮执行失败", f"未找到目标函数或执行失败：{e}")
+
+            查询按钮 = _创建主题按钮(
+                _取挂载容器(右列),
+                _取界面主题(右列),
+                查询文案,
+                点击动作,
+                锚点="e",
+            )
+            表格 = _加上表格(卡片, 列定义, 高度)
+            return {
+                "卡片": 卡片,
+                "关键字输入框": 关键字输入框,
+                "查询按钮": 查询按钮,
+                "表格": 表格,
+            }
+        _加列表模板._易码需要环境 = True
+
+        def _设位置(控件, x, y, 宽=0, 高=0):
+            x值 = max(0, _转整数(x, 0))
+            y值 = max(0, _转整数(y, 0))
+            宽值 = _转整数(宽, 0)
+            高值 = _转整数(高, 0)
+
+            try:
+                控件.pack_forget()
+            except Exception:
+                pass
+            try:
+                控件.grid_forget()
+            except Exception:
+                pass
+
+            参数 = {"x": x值, "y": y值}
+            if 宽值 > 0:
+                参数["width"] = 宽值
+            if 高值 > 0:
+                参数["height"] = 高值
+            控件.place(**参数)
+
+            try:
+                顶层 = 控件.winfo_toplevel()
+                更新滚动 = getattr(顶层, "_易码更新滚动区域", None)
+                if callable(更新滚动):
+                    更新滚动()
+            except Exception:
+                pass
+            return 控件
             
         def _弹窗提醒(标题, 内容):
             messagebox.showinfo(标题, 内容)
@@ -1292,6 +1587,7 @@ class 解释器:
         def _加上表格(窗口, 列定义, 高度=10):
             列名 = _规范列名(列定义)
             高度值 = max(3, int(高度))
+            主题 = _取界面主题(窗口)
 
             # 为表格单独设置字体和行高，避免中文在高 DPI 下被裁切
             # Tk 会自己处理系统缩放，这里不要再乘 DPI，避免行距被放大两次
@@ -1302,12 +1598,49 @@ class 解释器:
             行高 = max(24, min(34, 文字行高 + 6))
 
             样式 = ttk.Style(窗口)
+            try:
+                样式.theme_use("clam")
+            except Exception:
+                pass
             样式名 = f"Yima{id(窗口)}.Treeview"
-            样式.configure(样式名, font=内容字体, rowheight=行高)
-            样式.configure(f"{样式名}.Heading", font=表头字体)
+            样式.configure(
+                样式名,
+                font=内容字体,
+                rowheight=行高,
+                background=主题["表格背景"],
+                fieldbackground=主题["表格背景"],
+                foreground=主题["表格文字"],
+                borderwidth=0,
+                relief="flat",
+            )
+            样式.configure(
+                f"{样式名}.Heading",
+                font=表头字体,
+                background=主题["表格标题背景"],
+                foreground=主题["表格标题文字"],
+                borderwidth=0,
+                relief="flat",
+            )
+            样式.map(
+                样式名,
+                background=[("selected", 主题["表格选中背景"])],
+                foreground=[("selected", 主题["表格选中文字"])],
+            )
+            样式.map(
+                f"{样式名}.Heading",
+                background=[("active", 主题["表格标题背景"])],
+                foreground=[("active", 主题["表格标题文字"])],
+            )
 
             父容器 = _取挂载容器(窗口)
-            容器 = tk.Frame(父容器)
+            容器 = tk.Frame(
+                父容器,
+                bg=主题["内容背景"],
+                highlightthickness=1,
+                highlightbackground=主题["边框颜色"],
+                highlightcolor=主题["边框颜色"],
+                bd=0,
+            )
             容器.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
 
             表格 = ttk.Treeview(容器, columns=列名, show="headings", selectmode="browse", height=高度值, style=样式名)
@@ -1382,6 +1715,11 @@ class 解释器:
         self.全局环境.记住("读输入", _读取输入)
         self.全局环境.记住("改文字", _修改文字)
         self.全局环境.记住("加按钮", _加上按钮)
+        self.全局环境.记住("加卡片", _加上卡片)
+        self.全局环境.记住("加双列", _加上双列)
+        self.全局环境.记住("加登录模板", _加登录模板)
+        self.全局环境.记住("加列表模板", _加列表模板)
+        self.全局环境.记住("设位置", _设位置)
         self.全局环境.记住("弹窗", _弹窗提醒)
         self.全局环境.记住("弹窗输入", _弹窗输入)
         self.全局环境.记住("打开界面", _展示窗口)

@@ -17,6 +17,8 @@ import sys
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
+from yima.editor_ui_designer_flow import ensure_embedded_ui_designer
+
 
 def _build_feedback_dot_image(size=11, fill_color="#FF4D4F", border_color="#C83335"):
     size = max(8, int(size))
@@ -40,7 +42,7 @@ def _build_feedback_dot_image(size=11, fill_color="#FF4D4F", border_color="#C833
 
 
 def setup_ui(self):
-    # 顶部现代化菜单栏（分组 + 主按钮）
+    # 椤堕儴鐜颁唬鍖栬彍鍗曟爮锛堝垎缁?+ 涓绘寜閽級
     toolbar_shell = tk.Frame(
         self.root,
         bg=self.theme_toolbar_bg,
@@ -159,24 +161,24 @@ def setup_ui(self):
 
     right_actions = tk.Frame(toolbar, bg=self.theme_toolbar_bg)
     right_actions.pack(side=tk.RIGHT)
-    图标尺寸 = max(14, int(16 * self.dpi_scale))
-    self._toolbar_run_icon = self._build_toolbar_icon("run", size=图标尺寸, color="#FFFFFF")
-    self._toolbar_export_icon = self._build_toolbar_icon("export", size=图标尺寸, color="#FFFFFF")
+    icon_size = max(14, int(16 * self.dpi_scale))
+    self._toolbar_run_icon = self._build_toolbar_icon("run", size=icon_size, color="#FFFFFF")
+    self._toolbar_export_icon = self._build_toolbar_icon("export", size=icon_size, color="#FFFFFF")
 
-    # 固定槽位确保右上角两个按钮视觉同宽同高
-    顶栏按钮宽 = max(116, int(124 * self.dpi_scale))
-    顶栏按钮高 = max(30, int(32 * self.dpi_scale))
+    # 固定槽位，确保右上角两个按钮同宽同高
+    top_btn_width = max(116, int(124 * self.dpi_scale))
+    top_btn_height = max(30, int(32 * self.dpi_scale))
 
-    运行槽 = tk.Frame(right_actions, bg=self.theme_toolbar_bg, width=顶栏按钮宽, height=顶栏按钮高)
-    运行槽.pack(side=tk.RIGHT, padx=(0, 0))
-    运行槽.pack_propagate(False)
+    run_slot = tk.Frame(right_actions, bg=self.theme_toolbar_bg, width=top_btn_width, height=top_btn_height)
+    run_slot.pack(side=tk.RIGHT, padx=(0, 0))
+    run_slot.pack_propagate(False)
 
-    导出槽 = tk.Frame(right_actions, bg=self.theme_toolbar_bg, width=顶栏按钮宽, height=顶栏按钮高)
-    导出槽.pack(side=tk.RIGHT, padx=(0, 6))
-    导出槽.pack_propagate(False)
+    export_slot = tk.Frame(right_actions, bg=self.theme_toolbar_bg, width=top_btn_width, height=top_btn_height)
+    export_slot.pack(side=tk.RIGHT, padx=(0, 6))
+    export_slot.pack_propagate(False)
 
     create_tool_btn(
-        导出槽,
+        export_slot,
         "导出软件(exe)",
         self.export_exe,
         variant="accent",
@@ -186,7 +188,7 @@ def setup_ui(self):
     ).pack(fill=tk.BOTH, expand=True)
 
     create_tool_btn(
-        运行槽,
+        run_slot,
         "运行代码",
         self.run_code,
         variant="run",
@@ -212,16 +214,18 @@ def setup_ui(self):
     create_tool_group("文档", [
         ("示例中心", self.open_examples),
         ("速查表", self.open_cheatsheet),
+        ("界面设计器", self.open_ui_designer),
     ])
+
 
     tk.Frame(self.root, height=1, bg=self.theme_toolbar_border, bd=0).pack(fill=tk.X)
 
-    # 主分割区 (外层水平分割：左拉侧边栏，右拉主界面)
-    # 将分割线收拢到极致 1px
+    # 涓诲垎鍓插尯 (澶栧眰姘村钩鍒嗗壊锛氬乏鎷変晶杈规爮锛屽彸鎷変富鐣岄潰)
+    # 灏嗗垎鍓茬嚎鏀舵嫝鍒版瀬鑷?1px
     self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=1, bg=self.theme_sash, borderwidth=0)
     self.main_paned.pack(fill=tk.BOTH, expand=True)
     
-    # --- 左侧：资源管理器 (Sidebar) ---
+    # --- 宸︿晶锛氳祫婧愮鐞嗗櫒 (Sidebar) ---
     sidebar_frame = tk.Frame(self.main_paned, bg=self.theme_sidebar_bg)
 
     sidebar_header = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg, padx=10, pady=10)
@@ -254,8 +258,51 @@ def setup_ui(self):
         compact=True,
         font=("Microsoft YaHei", 8),
     ).pack(side=tk.RIGHT, padx=(6, 0))
+    mode_row = tk.Frame(sidebar_header, bg=self.theme_sidebar_bg)
+    mode_row.pack(fill=tk.X, pady=(8, 0))
+    tk.Label(
+        mode_row,
+        text="工作模式",
+        font=("Microsoft YaHei", 8),
+        bg=self.theme_sidebar_bg,
+        fg="#8FA1B8",
+        anchor="w",
+    ).pack(side=tk.LEFT)
+    self.workspace_mode = "code"
+    self.mode_btn_code = tk.Button(
+        mode_row,
+        text="代码",
+        command=lambda: self._switch_workspace_mode("code"),
+        font=("Microsoft YaHei", 8),
+        bg="#0E639C",
+        fg="#FFFFFF",
+        activebackground="#1577B8",
+        activeforeground="#FFFFFF",
+        relief="flat",
+        bd=0,
+        padx=10,
+        pady=2,
+        cursor="hand2",
+    )
+    self.mode_btn_code.pack(side=tk.RIGHT, padx=(0, 4))
+    self.mode_btn_designer = tk.Button(
+        mode_row,
+        text="可视化",
+        command=lambda: self._switch_workspace_mode("designer"),
+        font=("Microsoft YaHei", 8),
+        bg=self.theme_panel_bg,
+        fg="#C9D4E1",
+        activebackground=self.theme_toolbar_hover,
+        activeforeground="#FFFFFF",
+        relief="flat",
+        bd=0,
+        padx=10,
+        pady=2,
+        cursor="hand2",
+    )
+    self.mode_btn_designer.pack(side=tk.RIGHT, padx=(0, 6))
 
-    # 文件列表树容器（卡片化）
+    # 鏂囦欢鍒楄〃鏍戝鍣紙鍗＄墖鍖栵級
     tree_card = tk.Frame(
         sidebar_frame,
         bg=self.theme_panel_bg,
@@ -270,7 +317,7 @@ def setup_ui(self):
 
     self.tree = ttk.Treeview(tree_container, selectmode="browse")
 
-    # 滚动条 (垂直 + 水平)
+    # 婊氬姩鏉?(鍨傜洿 + 姘村钩)
     vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
     hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
     self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -282,7 +329,7 @@ def setup_ui(self):
     tree_container.grid_columnconfigure(0, weight=1)
     tree_container.grid_rowconfigure(0, weight=1)
 
-    # 代码结构大纲区（功能 / 图纸导航 + 折叠）
+    # 浠ｇ爜缁撴瀯澶х翰鍖猴紙鍔熻兘 / 鍥剧焊瀵艰埅 + 鎶樺彔锛?
     outline_section = tk.Frame(
         sidebar_frame,
         bg=self.theme_panel_bg,
@@ -346,14 +393,14 @@ def setup_ui(self):
     self.outline_listbox.bind("<Return>", self.on_outline_activate)
     self.outline_listbox.bind("<ButtonRelease-1>", self._outline_update_status)
 
-    # 速查卡：从速查表提炼高频写法，支持筛选和一键插入
+    # 閫熸煡鍗★細浠庨€熸煡琛ㄦ彁鐐奸珮棰戝啓娉曪紝鏀寔绛涢€夊拰涓€閿彃鍏?
     self._setup_cheatsheet_quick_section(sidebar_frame, create_tool_btn)
     
-    # 初始给左侧多分配一点空间，防止文字被遮挡
+    # 鍒濆缁欏乏渚у鍒嗛厤涓€鐐圭┖闂达紝闃叉鏂囧瓧琚伄鎸?
     sidebar_default_width = int(250 * self.dpi_scale)
     self.main_paned.add(sidebar_frame, stretch="never", minsize=sidebar_default_width)
     
-    # --- 右侧：内层垂直分割（上代码，下输出） ---
+    # --- 鍙充晶锛氬唴灞傚瀭鐩村垎鍓诧紙涓婁唬鐮侊紝涓嬭緭鍑猴級 ---
     self.right_paned = tk.PanedWindow(
         self.main_paned,
         orient=tk.VERTICAL,
@@ -374,12 +421,15 @@ def setup_ui(self):
             pass
     self.main_paned.add(self.right_paned, stretch="always", minsize=600)
     
-    # 代码多标签区 (Notebook)
-    editor_frame = tk.Frame(self.right_paned, bg=self.theme_bg, borderwidth=0)
-    
+    # 浠ｇ爜澶氭爣绛惧尯 (Notebook) / 可视化设计区（同位切换）
+    self.workspace_switch_frame = tk.Frame(self.right_paned, bg=self.theme_bg, borderwidth=0)
+    self.code_view_frame = tk.Frame(self.workspace_switch_frame, bg=self.theme_bg, borderwidth=0)
+    self.designer_view_frame = tk.Frame(self.workspace_switch_frame, bg=self.theme_bg, borderwidth=0)
+
+    editor_frame = self.code_view_frame
     self.notebook = ttk.Notebook(editor_frame, padding=0)
     try:
-        # 某些 Tk 版本会让 PanedWindow 的 sashcursor 影响到子控件，显式设置标签区光标避免出现上下箭头。
+        # 鏌愪簺 Tk 鐗堟湰浼氳 PanedWindow 鐨?sashcursor 褰卞搷鍒板瓙鎺т欢锛屾樉寮忚缃爣绛惧尯鍏夋爣閬垮厤鍑虹幇涓婁笅绠ご銆?
         self.notebook.configure(cursor="arrow")
     except tk.TclError:
         pass
@@ -390,9 +440,10 @@ def setup_ui(self):
     self.notebook.bind("<Button-2>", self.on_tab_middle_click, add="+")
     self.notebook.bind("<ButtonRelease-2>", self.on_tab_middle_click, add="+")
     
-    self.right_paned.add(editor_frame, stretch="always", minsize=400)
+    self.code_view_frame.pack(fill=tk.BOTH, expand=True)
+    self.right_paned.add(self.workspace_switch_frame, stretch="always", minsize=400)
     
-    # 底部反馈区（控制台 / 问题 / 提示）
+    # 搴曢儴鍙嶉鍖猴紙鎺у埗鍙?/ 闂 / 鎻愮ず锛?
     output_frame = tk.Frame(
         self.right_paned,
         bg=self.theme_bg,
@@ -409,7 +460,7 @@ def setup_ui(self):
         pass
     self.feedback_notebook.pack(fill=tk.BOTH, expand=True)
 
-    # 反馈页签右上角操作区：利用页签右侧空白，按当前页签展示操作
+    # 鍙嶉椤电鍙充笂瑙掓搷浣滃尯锛氬埄鐢ㄩ〉绛惧彸渚х┖鐧斤紝鎸夊綋鍓嶉〉绛惧睍绀烘搷浣?
     self.feedback_action_bar = tk.Frame(output_frame, bg=self.theme_bg)
     self.feedback_action_bar.place(relx=1.0, x=-8, y=4, anchor="ne")
     self.feedback_action_hint_var = tk.StringVar(value="")
@@ -432,7 +483,7 @@ def setup_ui(self):
     )
     self.feedback_action_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
-    # 控制台页
+    # 鎺у埗鍙伴〉
     console_tab = tk.Frame(self.feedback_notebook, bg=self.theme_bg, borderwidth=0)
     self.feedback_notebook.add(console_tab, text=" 控制台 ")
 
@@ -477,7 +528,7 @@ def setup_ui(self):
     self.output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     self._style_scrolledtext_vbar(self.output, parent=console_tab)
 
-    # 问题页（原左侧问题列表 + 详情）
+    # 闂椤碉紙鍘熷乏渚ч棶棰樺垪琛?+ 璇︽儏锛?
     issue_tab = tk.Frame(self.feedback_notebook, bg=self.theme_panel_bg, borderwidth=0)
     self.feedback_notebook.add(issue_tab, text=" 问题 ")
 
@@ -558,7 +609,7 @@ def setup_ui(self):
     self.issue_detail_label.pack(fill=tk.X)
     self.issue_detail_label.bind("<Configure>", self._update_issue_detail_wrap, add="+")
 
-    # 提示页（原左侧快速查看）
+    # 鎻愮ず椤碉紙鍘熷乏渚у揩閫熸煡鐪嬶級
     quick_tab = tk.Frame(self.feedback_notebook, bg=self.theme_panel_bg, borderwidth=0)
     self.feedback_notebook.add(quick_tab, text=" 提示 ")
 
@@ -606,7 +657,7 @@ def setup_ui(self):
         "issue": False,
         "quick": False,
     }
-    self._feedback_tab_red_dot = "•"
+    self._feedback_tab_red_dot = "●"
     self._feedback_tab_dot_image = _build_feedback_dot_image(
         size=max(10, int(11 * self.dpi_scale)),
         fill_color="#FF4D4F",
@@ -620,8 +671,8 @@ def setup_ui(self):
     update_feedback_action_bar(self)
     self._clear_output_console(keep_intro=True)
 
-    # 底部状态栏（当前文件 / 语法诊断 / 光标位置）
-    # 外层包裹容器：让底部信息区与主体区域形成稳定的视觉分层。
+    # 搴曢儴鐘舵€佹爮锛堝綋鍓嶆枃浠?/ 璇硶璇婃柇 / 鍏夋爣浣嶇疆锛?
+    # 澶栧眰鍖呰９瀹瑰櫒锛氳搴曢儴淇℃伅鍖轰笌涓讳綋鍖哄煙褰㈡垚绋冲畾鐨勮瑙夊垎灞傘€?
     status_wrap = tk.Frame(
         self.root,
         bg=self.theme_bg,
@@ -631,7 +682,7 @@ def setup_ui(self):
         highlightthickness=0,
     )
     status_wrap.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 4))
-    # 关键：重排 pack 顺序，确保状态栏先占底部高度，再让主分割区填充剩余空间。
+    # 鍏抽敭锛氶噸鎺?pack 椤哄簭锛岀‘淇濈姸鎬佹爮鍏堝崰搴曢儴楂樺害锛屽啀璁╀富鍒嗗壊鍖哄～鍏呭墿浣欑┖闂淬€?
     try:
         self.main_paned.pack_forget()
     except tk.TclError:
@@ -691,14 +742,14 @@ def setup_ui(self):
         padx=10
     ).pack(side=tk.RIGHT)
     
-    # 树状图右键菜单
+    # 鏍戠姸鍥惧彸閿彍鍗?
     self.tree_menu = tk.Menu(self.root, tearoff=0, font=self.font_ui)
-    self.tree_menu.add_command(label="📄 新建代码文件", command=self.create_new_file_in_tree)
+    self.tree_menu.add_command(label="📝 新建代码文件", command=self.create_new_file_in_tree)
     self.tree_menu.add_command(label="📁 新建文件夹", command=self.create_new_folder_in_tree)
     self.tree_menu.add_separator()
     self.tree_menu.add_command(label="🗑️ 删除", command=self.delete_item_in_tree)
     
-    # 智能弹出提示框（双列：类型 + 候选）
+    # 鏅鸿兘寮瑰嚭鎻愮ず妗嗭紙鍙屽垪锛氱被鍨?+ 鍊欓€夛級
     self.autocomplete_popup = tk.Frame(
         self.root,
         bg=self.theme_toolbar_border,
@@ -737,7 +788,7 @@ def setup_ui(self):
     self.autocomplete_tree.bind("<ButtonRelease-1>", self._accept_autocomplete)
     self.autocomplete_tree.bind("<Double-Button-1>", self._accept_autocomplete)
 
-    # 参数提示（Call Tip）
+    # 鍙傛暟鎻愮ず锛圕all Tip锛?
     self.calltip_popup = tk.Frame(
         self.root,
         bg="#0F1B2B",
@@ -760,11 +811,111 @@ def setup_ui(self):
     self.calltip_label.pack(fill=tk.BOTH, expand=True)
     self.calltip_popup.place_forget()
     
-    # 初始化界面后：优先恢复上次项目；恢复失败则创建默认代码页
+    # 鍒濆鍖栫晫闈㈠悗锛氫紭鍏堟仮澶嶄笂娆￠」鐩紱鎭㈠澶辫触鍒欏垱寤洪粯璁や唬鐮侀〉
     if not self._try_restore_last_project():
         self.refresh_file_tree()
-        self._create_editor_tab("未命名代码.ym")
+        self._create_editor_tab("鏈懡鍚嶄唬鐮?ym")
     self._refresh_quick_view()
+    switch_workspace_mode(self, "code")
+
+
+def _refresh_workspace_mode_buttons(owner):
+    mode = str(getattr(owner, "workspace_mode", "code") or "code")
+    code_btn = getattr(owner, "mode_btn_code", None)
+    designer_btn = getattr(owner, "mode_btn_designer", None)
+    if code_btn is None or designer_btn is None:
+        return
+
+    try:
+        if mode == "designer":
+            code_btn.configure(
+                bg=owner.theme_panel_bg,
+                fg="#C9D4E1",
+                activebackground=owner.theme_toolbar_hover,
+                activeforeground="#FFFFFF",
+            )
+            designer_btn.configure(
+                bg="#0E639C",
+                fg="#FFFFFF",
+                activebackground="#1577B8",
+                activeforeground="#FFFFFF",
+            )
+        else:
+            code_btn.configure(
+                bg="#0E639C",
+                fg="#FFFFFF",
+                activebackground="#1577B8",
+                activeforeground="#FFFFFF",
+            )
+            designer_btn.configure(
+                bg=owner.theme_panel_bg,
+                fg="#C9D4E1",
+                activebackground=owner.theme_toolbar_hover,
+                activeforeground="#FFFFFF",
+            )
+    except tk.TclError:
+        return
+
+
+def switch_workspace_mode(owner, mode="code"):
+    target = "designer" if str(mode).strip().lower() in {"designer", "design", "ui", "visual", "可视化"} else "code"
+    current = str(getattr(owner, "workspace_mode", "code") or "code")
+
+    code_frame = getattr(owner, "code_view_frame", None)
+    designer_frame = getattr(owner, "designer_view_frame", None)
+    host = getattr(owner, "workspace_switch_frame", None)
+    if code_frame is None or designer_frame is None or host is None:
+        owner.workspace_mode = target
+        _refresh_workspace_mode_buttons(owner)
+        return
+
+    if target == "designer":
+        if current != "designer":
+            try:
+                code_frame.pack_forget()
+            except tk.TclError:
+                pass
+            panel = ensure_embedded_ui_designer(owner, designer_frame)
+            try:
+                panel.pack(fill=tk.BOTH, expand=True)
+            except tk.TclError:
+                pass
+            try:
+                designer_frame.pack(fill=tk.BOTH, expand=True)
+            except tk.TclError:
+                pass
+        owner.workspace_mode = "designer"
+        if hasattr(owner, "status_main_var"):
+            owner.status_main_var.set("已切换到可视化界面设计模式")
+    else:
+        if current == "designer":
+            panel = getattr(owner, "_ui_designer_embedded_panel", None)
+            if panel is not None:
+                try:
+                    panel.pack_forget()
+                except tk.TclError:
+                    pass
+            try:
+                designer_frame.pack_forget()
+            except tk.TclError:
+                pass
+        try:
+            code_frame.pack(fill=tk.BOTH, expand=True)
+        except tk.TclError:
+            pass
+        owner.workspace_mode = "code"
+        if hasattr(owner, "status_main_var"):
+            owner.status_main_var.set("已切换到代码编辑模式")
+        editor_getter = getattr(owner, "_get_current_editor", None)
+        if callable(editor_getter):
+            editor = editor_getter()
+            if editor is not None:
+                try:
+                    editor.focus_set()
+                except tk.TclError:
+                    pass
+
+    _refresh_workspace_mode_buttons(owner)
 
 
 def _feedback_selected_key(owner):
@@ -818,7 +969,7 @@ def refresh_feedback_tab_badges(owner):
 
     current = _feedback_selected_key(owner)
 
-    dot = str(getattr(owner, "_feedback_tab_red_dot", "•") or "•")
+    dot = str(getattr(owner, "_feedback_tab_red_dot", "●") or "●")
     dot_image = getattr(owner, "_feedback_tab_dot_image", None)
     for key, title in base_text.items():
         widget = tab_widgets.get(key)
@@ -845,8 +996,7 @@ def mark_feedback_tab(owner, tab_key, active=True):
         unread[tab_key] = False
         refresh_feedback_tab_badges(owner)
         return
-    # 当前就在该页签时视为“已读”，不产生红点。
-    if _feedback_selected_key(owner) == tab_key:
+    # 褰撳墠灏卞湪璇ラ〉绛炬椂瑙嗕负鈥滃凡璇烩€濓紝涓嶄骇鐢熺孩鐐广€?    if _feedback_selected_key(owner) == tab_key:
         unread[tab_key] = False
         refresh_feedback_tab_badges(owner)
         return

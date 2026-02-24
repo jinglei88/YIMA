@@ -23,6 +23,34 @@ ROOT = Path(__file__).resolve().parents[1]
 CHEATSHEET_DOC = ROOT / "文档" / "速查表.md"
 
 
+UI_TEMPLATE_SNIPPETS = {
+    "登录模板": (
+        "# --- 登录界面模板 ---\n"
+        "窗口 = 建窗口(\"登录页面\", 820, 520)\n"
+        "登录区 = 加登录模板(窗口, \"账号登录\", \"登录\", \"处理登录\")\n"
+        "\n"
+        "功能 处理登录\n"
+        "    账号 = 读输入(登录区[\"账号输入框\"])\n"
+        "    密码 = 读输入(登录区[\"密码输入框\"])\n"
+        "    弹窗(\"登录\", \"账号：\" + 账号)\n"
+        "\n"
+        "打开界面(窗口)\n"
+    ),
+    "列表模板": (
+        "# --- 列表界面模板 ---\n"
+        "窗口 = 建窗口(\"列表页面\", 920, 560)\n"
+        "列表区 = 加列表模板(窗口, \"数据列表\", [\"账号\", \"角色\", \"状态\"], 10, \"查询\", \"执行查询\")\n"
+        "\n"
+        "功能 执行查询\n"
+        "    关键字 = 读输入(列表区[\"关键字输入框\"])\n"
+        "    表格清空(列表区[\"表格\"])\n"
+        "    表格加行(列表区[\"表格\"], [关键字, \"管理员\", \"启用\"])\n"
+        "\n"
+        "打开界面(窗口)\n"
+    ),
+}
+
+
 def _read_doc_text():
     if not CHEATSHEET_DOC.exists():
         return f"未找到速查表文件：{CHEATSHEET_DOC}"
@@ -601,6 +629,35 @@ def _selected_quick_pattern(owner):
     return visible[idx]
 
 
+def _insert_text_to_current_editor(owner, text, success_message):
+    editor = owner._get_current_editor()
+    if editor is None:
+        if hasattr(owner, "status_main_var"):
+            owner.status_main_var.set("当前没有打开代码编辑区，无法插入")
+        return False
+
+    insert_text = str(text or "").strip()
+    if not insert_text:
+        return False
+
+    try:
+        if editor.tag_ranges("sel"):
+            editor.delete("sel.first", "sel.last")
+        editor.insert("insert", insert_text)
+        editor.focus_set()
+        owner._schedule_highlight()
+        owner._update_line_numbers()
+        owner._update_cursor_status()
+        owner._schedule_diagnose()
+        if hasattr(owner, "status_main_var"):
+            owner.status_main_var.set(str(success_message or "已插入代码片段"))
+        return True
+    except tk.TclError:
+        if hasattr(owner, "status_main_var"):
+            owner.status_main_var.set("插入失败：当前编辑器不可用")
+        return False
+
+
 def _update_quick_pattern_detail(owner):
     detail_var = getattr(owner, "cheatsheet_quick_detail_var", None)
     if detail_var is None:
@@ -701,6 +758,25 @@ def setup_cheatsheet_quick_section(owner, sidebar_frame, create_tool_btn):
         font=("Microsoft YaHei", 8),
     ).pack(side=tk.LEFT, padx=(4, 0))
 
+    template_row = tk.Frame(body, bg=owner.theme_panel_bg)
+    template_row.pack(fill=tk.X, pady=(4, 0))
+    create_tool_btn(
+        template_row,
+        "登录模板",
+        lambda: insert_ui_template(owner, "登录模板"),
+        variant="subtle",
+        compact=True,
+        font=("Microsoft YaHei", 8),
+    ).pack(side=tk.LEFT)
+    create_tool_btn(
+        template_row,
+        "列表模板",
+        lambda: insert_ui_template(owner, "列表模板"),
+        variant="subtle",
+        compact=True,
+        font=("Microsoft YaHei", 8),
+    ).pack(side=tk.LEFT, padx=(4, 0))
+
     owner.cheatsheet_quick_detail_var = tk.StringVar(value="推荐：-\n示例：-")
     detail_box = tk.Frame(
         body,
@@ -773,30 +849,10 @@ def insert_selected_cheatsheet_pattern(owner, event=None):
             owner.status_main_var.set("请先在速查卡里选一条写法")
         return "break"
 
-    editor = owner._get_current_editor()
-    if editor is None:
-        if hasattr(owner, "status_main_var"):
-            owner.status_main_var.set("当前没有打开代码编辑区，无法插入")
-        return "break"
-
     insert_text = str(item.get("syntax", "")).strip()
     if not insert_text:
         return "break"
-
-    try:
-        if editor.tag_ranges("sel"):
-            editor.delete("sel.first", "sel.last")
-        editor.insert("insert", insert_text)
-        editor.focus_set()
-        owner._schedule_highlight()
-        owner._update_line_numbers()
-        owner._update_cursor_status()
-        owner._schedule_diagnose()
-        if hasattr(owner, "status_main_var"):
-            owner.status_main_var.set(f"已插入推荐写法：{item.get('scene', '')}")
-    except tk.TclError:
-        if hasattr(owner, "status_main_var"):
-            owner.status_main_var.set("插入失败：当前编辑器不可用")
+    _insert_text_to_current_editor(owner, insert_text, f"已插入推荐写法：{item.get('scene', '')}")
     return "break"
 
 
@@ -805,4 +861,15 @@ def open_cheatsheet_from_quick(owner, event=None):
     line_no = item.get("line_no") if item else None
     query = ""
     open_cheatsheet(owner, line_no=line_no, query=query)
+    return "break"
+
+
+def insert_ui_template(owner, template_name):
+    name = str(template_name or "").strip()
+    snippet = UI_TEMPLATE_SNIPPETS.get(name)
+    if not snippet:
+        if hasattr(owner, "status_main_var"):
+            owner.status_main_var.set(f"未找到界面模板：{name}")
+        return "break"
+    _insert_text_to_current_editor(owner, snippet, f"已插入界面模板：{name}")
     return "break"
