@@ -44,3 +44,11 @@ jobs:
       - name: Run Release Regression (full)
         if: ${{ !inputs.skip_pack }}
         run: python scripts/run_release_regression.py
+
+      - name: Upload Example Matrix Report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-matrix-release
+          path: .reports/example-matrix-release.json
+          if-no-files-found: warn

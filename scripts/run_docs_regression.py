@@ -64,8 +64,38 @@ def assert_no_legacy_alias_claim(path: Path) -> None:
             raise AssertionError(f"{path} 仍包含过期兼容描述：{needle}")
 
 
+def runtime_cli_exit_codes() -> dict[str, int]:
+    text = read_text(ROOT / "易码.py")
+    names = [
+        "EXIT_OK",
+        "EXIT_CLI_USAGE",
+        "EXIT_FILE_ERROR",
+        "EXIT_LEX_ERROR",
+        "EXIT_PARSE_ERROR",
+        "EXIT_RUNTIME_ERROR",
+        "EXIT_INTERNAL_ERROR",
+    ]
+    result: dict[str, int] = {}
+    for name in names:
+        m = re.search(rf"^{name}\s*=\s*(\d+)\s*$", text, re.M)
+        if not m:
+            raise AssertionError(f"易码.py 缺少退出码常量：{name}")
+        result[name] = int(m.group(1))
+    return result
+
+
+def assert_cli_exit_code_doc(path: Path, exit_codes: dict[str, int]) -> None:
+    text = read_text(path)
+    if "CLI 退出码" not in text:
+        raise AssertionError(f"{path} 缺少 CLI 退出码说明段落。")
+    for name, code in exit_codes.items():
+        if f"`{code}`" not in text:
+            raise AssertionError(f"{path} 缺少退出码 {name}={code} 的文档说明。")
+
+
 def main() -> int:
     expected = runtime_builtin_count()
+    cli_exit_codes = runtime_cli_exit_codes()
 
     # 1) 检查核心文档中的函数数量标注
     assert_count_mark(
@@ -91,6 +121,12 @@ def main() -> int:
 
     # 2) 防止旧兼容别名描述回流
     assert_no_legacy_alias_claim(ROOT / "文档/语言规范.md")
+
+    # 3) 检查 CLI 退出码文档与实现一致
+    assert_cli_exit_code_doc(ROOT / "README.md", cli_exit_codes)
+    assert_cli_exit_code_doc(ROOT / "文档/开发者教程.md", cli_exit_codes)
+    assert_cli_exit_code_doc(ROOT / "文档/开发指南.md", cli_exit_codes)
+    assert_cli_exit_code_doc(ROOT / "文档/速查表.md", cli_exit_codes)
 
     print(f"[OK] 文档一致性通过（内置函数 {expected} 个）")
     return 0

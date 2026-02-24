@@ -12,6 +12,9 @@ venv/
 # Logs and temp artifacts
 *.log
 *.db
+.reports/
+_网图下载测试/
+测试文件123.txt
 out.txt
 err.txt
 output.log

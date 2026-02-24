@@ -4,7 +4,8 @@
 用途：
 1. 编译检查核心 Python 文件；
 2. 运行关键示例；
-3. 验证本轮关键语义（除零报错、严格局部作用域开关、模块导入缓存）。
+3. 验证本轮关键语义（除零报错、严格局部作用域开关、模块导入缓存）；
+4. 验证 CLI 契约（版本号、-c 执行、严格模式参数覆盖）。
 """
 
 from __future__ import annotations
@@ -32,6 +33,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
 SYS_ENCODING = locale.getpreferredencoding(False) or "utf-8"
+EXIT_FILE_ERROR = 3
+EXIT_LEX_ERROR = 10
+EXIT_PARSE_ERROR = 11
+EXIT_RUNTIME_ERROR = 12
 
 
 def run_cmd(
@@ -59,10 +64,38 @@ def run_cmd(
     return output
 
 
+def run_cmd_raw(
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> tuple[int, str]:
+    merged_env = dict(os.environ)
+    merged_env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+    if env:
+        merged_env.update(env)
+    proc = subprocess.run(
+        args,
+        cwd=cwd or ROOT,
+        env=merged_env,
+        capture_output=True,
+        text=True,
+        encoding=SYS_ENCODING,
+        errors="replace",
+    )
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode, output
+
+
 def assert_contains(text: str, needle: str, label: str) -> None:
     if needle not in text:
         safe = text.encode("unicode_escape", errors="replace").decode("ascii", errors="replace")
         raise AssertionError(f"{label} 失败：未找到【{needle}】\\n实际输出(转义)：\\n{safe}")
+
+
+def _assert_rc(actual: int, expected: int, label: str) -> None:
+    if actual != expected:
+        raise AssertionError(f"{label} 失败：期望退出码 {expected}，实际 {actual}")
 
 
 def compile_check() -> None:
@@ -173,6 +206,60 @@ def semantic_check() -> None:
     print("[OK] 模板字面量转义通过")
 
 
+def cli_contract_check() -> None:
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+    out = run_cmd([PY, "易码.py", "--help"])
+    assert_contains(out, "Examples /", "CLI --help 示例块")
+    assert_contains(out, "--strict-scope", "CLI --help 参数列表")
+
+    out = run_cmd([PY, "易码.py", "--version"])
+    assert_contains(out, version, "CLI 版本号")
+
+    out = run_cmd([PY, "易码.py", "-c", "显示 1 + 1"])
+    assert_contains(out, "2", "CLI -c 执行")
+
+    strict_env = dict(os.environ)
+    strict_env["YIMA_STRICT_SCOPE"] = "0"
+    out = run_cmd(
+        [
+            PY,
+            "易码.py",
+            "--strict-scope",
+            "-c",
+            "x = 1\n功能 f()\n    x = 2\nf()\n显示 x",
+        ],
+        env=strict_env,
+    )
+    assert_contains(out, "1", "CLI --strict-scope 覆盖环境变量")
+
+    strict_env["YIMA_STRICT_SCOPE"] = "1"
+    out = run_cmd(
+        [
+            PY,
+            "易码.py",
+            "--no-strict-scope",
+            "-c",
+            "x = 1\n功能 f()\n    x = 2\nf()\n显示 x",
+        ],
+        env=strict_env,
+    )
+    assert_contains(out, "2", "CLI --no-strict-scope 覆盖环境变量")
+
+    rc, _out = run_cmd_raw([PY, "易码.py", "-c", "显示 @"])
+    _assert_rc(rc, EXIT_LEX_ERROR, "CLI 词法错误退出码")
+
+    rc, _out = run_cmd_raw([PY, "易码.py", "-c", "显示 (1 + 2"])
+    _assert_rc(rc, EXIT_PARSE_ERROR, "CLI 语法错误退出码")
+
+    rc, _out = run_cmd_raw([PY, "易码.py", "-c", "显示 1 / 0"])
+    _assert_rc(rc, EXIT_RUNTIME_ERROR, "CLI 运行错误退出码")
+
+    rc, _out = run_cmd_raw([PY, "易码.py", "_definitely_not_exists_12345.ym"])
+    _assert_rc(rc, EXIT_FILE_ERROR, "CLI 文件错误退出码")
+    print("[OK] CLI 契约回归通过")
+
+
 def error_regression_check() -> None:
     out = run_cmd([PY, "scripts/run_error_regression.py"])
     assert_contains(out, "错误体验回归完成：全部通过", "错误体验回归")
@@ -196,6 +283,7 @@ def main() -> int:
     compile_check()
     sample_check()
     semantic_check()
+    cli_contract_check()
     error_regression_check()
     editor_logic_regression_check()
     packaging_regression_check()

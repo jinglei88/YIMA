@@ -5,8 +5,9 @@
 1. scripts/run_regression.py
 2. scripts/run_docs_regression.py
 3. scripts/run_v1_contract_regression.py
-4. M16 自动回归
-5. 打包冒烟（含打包清单机制）
+4. scripts/run_example_matrix.py --mode automated
+5. M16 自动回归
+6. 打包冒烟（含打包清单机制）
 """
 
 from __future__ import annotations
@@ -86,6 +87,21 @@ def regression_v1_contract() -> None:
     print("[OK] v1 契约回归通过")
 
 
+def regression_example_matrix() -> None:
+    out = run_cmd(
+        [
+            PY,
+            "scripts/run_example_matrix.py",
+            "--mode",
+            "automated",
+            "--json-out",
+            ".reports/example-matrix-release.json",
+        ]
+    )
+    assert_contains(out, "=== Example Matrix End: PASSED ===", "示例矩阵自动层")
+    print("[OK] 示例矩阵（自动层）通过")
+
+
 def regression_m16() -> None:
     out = run_cmd([PY, "易码.py", "示例/M16全量能力测试项目/主程序.ym"])
     assert_contains(out, "自动回归全部通过", "M16 自动回归")
@@ -158,6 +174,7 @@ def main() -> int:
     regression_base()
     regression_docs()
     regression_v1_contract()
+    regression_example_matrix()
     regression_m16()
     if args.skip_pack:
         print("[SKIP] 已跳过打包冒烟")

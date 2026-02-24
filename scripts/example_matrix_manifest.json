@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "defaults": {
+    "timeout_sec": 25
+  },
+  "overrides": {
+    "示例/经典案例_注册登录_自动测试.ym": {
+      "tier": "automated",
+      "isolate_cwd": true,
+      "note": "Writes local database files; run in isolated cwd."
+    },
+    "示例/经典案例_真实网络请求实战.ym": {
+      "tier": "manual",
+      "note": "Relies on external network availability and is intentionally excluded from CI automated tier."
+    },
+    "示例/M13实战_密码管家.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI app with event loop."
+    },
+    "示例/M14记账本项目/主程序.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "Starts GUI layer and keeps running."
+    },
+    "示例/M14记账本项目/记账本_界面层.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI module with event loop."
+    },
+    "示例/M15网格账号密码本.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI table app."
+    },
+    "示例/M16全量能力测试项目/07_GUI手动交互验证.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "Explicit manual GUI validation."
+    },
+    "示例/M16全量能力测试项目/08_画板手动交互验证.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "Explicit manual canvas validation."
+    },
+    "示例/M17任务协作台项目/主程序.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI app entry."
+    },
+    "示例/M7图形界面测试.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI demo."
+    },
+    "示例/M8猜数字游戏.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI game loop."
+    },
+    "示例/内置画图测试.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "Canvas drawing loop."
+    },
+    "示例/勇者大冒险.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI app loop."
+    },
+    "示例/待办事项本.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI app loop."
+    },
+    "示例/经典案例_注册登录_GUI数据库.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI + database app."
+    },
+    "示例/经典案例_网图下载器.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "GUI downloader app."
+    },
+    "示例/贪吃蛇.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "Canvas game loop."
+    },
+    "示例/超级玛丽_画布版.ym": {
+      "tier": "manual",
+      "expected": "timeout",
+      "note": "Canvas game loop."
+    }
+  }
+}

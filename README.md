@@ -19,7 +19,34 @@ python 易码.py 示例/欢迎.ym
 
 # 图形化编辑器
 python 易码编辑器.py
+
+# 查看命令行帮助
+python 易码.py --help
+
+# 直接执行一段源码
+python 易码.py -c "显示 1 + 1"
+
+# 显示版本号
+python 易码.py --version
 ```
+
+常用 CLI 参数：
+
+- `-c/--code`：直接执行一段易码源码。
+- `--strict-scope`：强制开启严格局部作用域（覆盖环境变量）。
+- `--no-strict-scope`：强制关闭严格局部作用域（覆盖环境变量）。
+- `--traceback`：内部异常时显示 Python 调用栈。
+- `-v/--version`：输出版本号并退出。
+
+CLI 退出码约定：
+
+- `0`：成功。
+- `2`：命令行参数错误（`argparse`）。
+- `3`：文件读取/路径错误。
+- `10`：词法错误。
+- `11`：语法错误。
+- `12`：运行错误。
+- `20`：解释器内部错误。
 
 ## 已实现语法（核心）
 
@@ -128,6 +155,7 @@ python 易码编辑器.py
 
 - `YIMA_STRICT_SCOPE=1`：开启严格局部作用域（函数内赋值默认写入当前局部，不向上覆盖父作用域同名变量）。
 - 默认不开启，保持当前示例兼容行为。
+- 命令行可用 `--strict-scope` / `--no-strict-scope` 临时覆盖该环境变量。
 
 Windows PowerShell 示例：
 
@@ -143,7 +171,13 @@ Remove-Item Env:YIMA_STRICT_SCOPE
 python scripts/run_regression.py
 ```
 
-发布前一键回归（基础回归 + 文档一致性 + M16 + 打包冒烟）：
+仅跑示例矩阵自动层（默认跳过 `manual` 分级示例）：
+
+```bash
+python scripts/run_example_matrix.py --mode automated --json-out .reports/example-matrix-local.json
+```
+
+发布前一键回归（基础回归 + 文档一致性 + v1 契约 + 示例矩阵自动层 + M16 + 打包冒烟）：
 
 ```bash
 python scripts/run_release_regression.py
@@ -190,8 +224,10 @@ CI 自动托管回归：
 - 仓库内置 GitHub Actions 工作流：`.github/workflows/ci.yml`
 - 在 `push / pull_request / workflow_dispatch` 时自动执行：
   - `scripts/run_regression.py`
+  - `scripts/run_example_matrix.py --mode automated`
   - `scripts/run_docs_regression.py`
   - `scripts/run_v1_contract_regression.py`
+  - 并上传示例矩阵 JSON 报告（artifact）
 - 发布前手动工作流：`.github/workflows/release-regression.yml`
   - `workflow_dispatch` 触发
   - 支持 `skip_pack=true/false`（是否跳过打包冒烟）
