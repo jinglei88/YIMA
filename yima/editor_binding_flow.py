@@ -72,6 +72,73 @@ def build_toolbar_icon(owner, kind="run", size=16, color="#FFFFFF"):
         if 0 <= x < size and 0 <= y < size:
             img.put(color, (x, y))
 
+    def draw_line(x0, y0, x1, y1, thickness=1):
+        x0 = int(x0)
+        y0 = int(y0)
+        x1 = int(x1)
+        y1 = int(y1)
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+        radius = max(0, int(thickness) - 1)
+        while True:
+            for oy in range(-radius, radius + 1):
+                for ox in range(-radius, radius + 1):
+                    put_px(x0 + ox, y0 + oy)
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x0 += sx
+            if e2 <= dx:
+                err += dx
+                y0 += sy
+
+    def draw_rect(x, y, w, h, thickness=1):
+        left = int(x)
+        top = int(y)
+        right = int(x + w - 1)
+        bottom = int(y + h - 1)
+        for t in range(max(1, int(thickness))):
+            for px in range(left + t, right - t + 1):
+                put_px(px, top + t)
+                put_px(px, bottom - t)
+            for py in range(top + t, bottom - t + 1):
+                put_px(left + t, py)
+                put_px(right - t, py)
+
+    if kind == "code":
+        # </>：代码图标（更接近 SVG 风格的粗线轮廓）
+        margin = int(size * 0.16)
+        mid = size // 2
+        left_x = margin + 2
+        right_x = size - margin - 2
+        arm = max(5, int(size * 0.24))
+        lift = max(4, int(size * 0.20))
+        draw_line(left_x + arm, mid - lift, left_x, mid, thickness=2)
+        draw_line(left_x + arm, mid + lift, left_x, mid, thickness=2)
+        draw_line(right_x - arm, mid - lift, right_x, mid, thickness=2)
+        draw_line(right_x - arm, mid + lift, right_x, mid, thickness=2)
+        draw_line(size // 2 + 3, margin + 1, size // 2 - 2, size - margin - 2, thickness=2)
+        return img
+
+    if kind == "design":
+        # 画板布局图标：左边栏 + 右侧网格块
+        inset = 2
+        draw_rect(inset, inset, size - inset * 2, size - inset * 2, thickness=2)
+        tool_w = max(4, int(size * 0.24))
+        draw_line(inset + tool_w, inset + 1, inset + tool_w, size - inset - 1, thickness=2)
+        cell = max(3, int((size - tool_w - 8) / 3))
+        gx = inset + tool_w + 2
+        gy = inset + 2
+        for row in range(3):
+            for col in range(2):
+                draw_rect(gx + col * (cell + 2), gy + row * (cell + 2), cell, cell, thickness=1)
+        return img
+
     if kind == "run":
         left = int(size * 0.16)
         right = int(size * 0.90)
@@ -190,4 +257,3 @@ def bind_events(owner, editor=None):
     target_editor.bind("<Next>", owner._handle_autocomplete_nav)
     target_editor.bind("<Escape>", lambda e: owner._hide_autocomplete())
     target_editor.bind("<Control-space>", owner._trigger_autocomplete)
-

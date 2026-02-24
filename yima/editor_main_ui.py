@@ -224,9 +224,73 @@ def setup_ui(self):
     # 灏嗗垎鍓茬嚎鏀舵嫝鍒版瀬鑷?1px
     self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=1, bg=self.theme_sash, borderwidth=0)
     self.main_paned.pack(fill=tk.BOTH, expand=True)
+    # 最左侧：模式边栏（仅图标）
+    mode_rail_width = int(42 * self.dpi_scale)
+    mode_rail = tk.Frame(
+        self.main_paned,
+        bg=self.theme_toolbar_bg,
+        width=mode_rail_width,
+        highlightthickness=1,
+        highlightbackground=self.theme_toolbar_border,
+        highlightcolor=self.theme_toolbar_border,
+        bd=0,
+    )
+    self.mode_rail = mode_rail
+    mode_rail.pack_propagate(False)
+    self.main_paned.add(mode_rail, stretch="never", minsize=mode_rail_width)
+    self.workspace_mode = "code"
+
+    mode_icon_size = max(20, int(20 * self.dpi_scale))
+    self._mode_code_icon_active = self._build_toolbar_icon("code", size=mode_icon_size, color="#FFFFFF")
+    self._mode_code_icon_idle = self._build_toolbar_icon("code", size=mode_icon_size, color="#9FB0C5")
+    self._mode_design_icon_active = self._build_toolbar_icon("design", size=mode_icon_size, color="#FFFFFF")
+    self._mode_design_icon_idle = self._build_toolbar_icon("design", size=mode_icon_size, color="#9FB0C5")
+
+    slot_size = int(36 * self.dpi_scale)
+    top_gap = int(10 * self.dpi_scale)
+    between_gap = int(14 * self.dpi_scale)
+
+    code_slot = tk.Frame(mode_rail, bg=self.theme_toolbar_bg, width=slot_size, height=slot_size)
+    code_slot.pack(padx=3, pady=(top_gap, between_gap))
+    code_slot.pack_propagate(False)
+    self.mode_btn_code = tk.Button(
+        code_slot,
+        image=self._mode_code_icon_active,
+        text="",
+        command=lambda: self._switch_workspace_mode("code"),
+        bg="#0E639C",
+        activebackground="#1577B8",
+        relief="flat",
+        bd=0,
+        padx=0,
+        pady=0,
+        cursor="hand2",
+        takefocus=0,
+    )
+    self.mode_btn_code.pack(fill=tk.BOTH, expand=True)
+
+    designer_slot = tk.Frame(mode_rail, bg=self.theme_toolbar_bg, width=slot_size, height=slot_size)
+    designer_slot.pack(padx=3, pady=(0, between_gap))
+    designer_slot.pack_propagate(False)
+    self.mode_btn_designer = tk.Button(
+        designer_slot,
+        image=self._mode_design_icon_idle,
+        text="",
+        command=lambda: self._switch_workspace_mode("designer"),
+        bg=self.theme_panel_bg,
+        activebackground=self.theme_toolbar_hover,
+        relief="flat",
+        bd=0,
+        padx=0,
+        pady=0,
+        cursor="hand2",
+        takefocus=0,
+    )
+    self.mode_btn_designer.pack(fill=tk.BOTH, expand=True)
     
     # --- 宸︿晶锛氳祫婧愮鐞嗗櫒 (Sidebar) ---
     sidebar_frame = tk.Frame(self.main_paned, bg=self.theme_sidebar_bg)
+    self.sidebar_frame = sidebar_frame
 
     sidebar_header = tk.Frame(sidebar_frame, bg=self.theme_sidebar_bg, padx=10, pady=10)
     sidebar_header.pack(fill=tk.X)
@@ -258,50 +322,6 @@ def setup_ui(self):
         compact=True,
         font=("Microsoft YaHei", 8),
     ).pack(side=tk.RIGHT, padx=(6, 0))
-    mode_row = tk.Frame(sidebar_header, bg=self.theme_sidebar_bg)
-    mode_row.pack(fill=tk.X, pady=(8, 0))
-    tk.Label(
-        mode_row,
-        text="工作模式",
-        font=("Microsoft YaHei", 8),
-        bg=self.theme_sidebar_bg,
-        fg="#8FA1B8",
-        anchor="w",
-    ).pack(side=tk.LEFT)
-    self.workspace_mode = "code"
-    self.mode_btn_code = tk.Button(
-        mode_row,
-        text="代码",
-        command=lambda: self._switch_workspace_mode("code"),
-        font=("Microsoft YaHei", 8),
-        bg="#0E639C",
-        fg="#FFFFFF",
-        activebackground="#1577B8",
-        activeforeground="#FFFFFF",
-        relief="flat",
-        bd=0,
-        padx=10,
-        pady=2,
-        cursor="hand2",
-    )
-    self.mode_btn_code.pack(side=tk.RIGHT, padx=(0, 4))
-    self.mode_btn_designer = tk.Button(
-        mode_row,
-        text="可视化",
-        command=lambda: self._switch_workspace_mode("designer"),
-        font=("Microsoft YaHei", 8),
-        bg=self.theme_panel_bg,
-        fg="#C9D4E1",
-        activebackground=self.theme_toolbar_hover,
-        activeforeground="#FFFFFF",
-        relief="flat",
-        bd=0,
-        padx=10,
-        pady=2,
-        cursor="hand2",
-    )
-    self.mode_btn_designer.pack(side=tk.RIGHT, padx=(0, 6))
-
     # 鏂囦欢鍒楄〃鏍戝鍣紙鍗＄墖鍖栵級
     tree_card = tk.Frame(
         sidebar_frame,
@@ -398,6 +418,7 @@ def setup_ui(self):
     
     # 鍒濆缁欏乏渚у鍒嗛厤涓€鐐圭┖闂达紝闃叉鏂囧瓧琚伄鎸?
     sidebar_default_width = int(250 * self.dpi_scale)
+    self.sidebar_default_width = sidebar_default_width
     self.main_paned.add(sidebar_frame, stretch="never", minsize=sidebar_default_width)
     
     # --- 鍙充晶锛氬唴灞傚瀭鐩村垎鍓诧紙涓婁唬鐮侊紝涓嬭緭鍑猴級 ---
@@ -420,6 +441,7 @@ def setup_ui(self):
         except tk.TclError:
             pass
     self.main_paned.add(self.right_paned, stretch="always", minsize=600)
+    self.right_paned_minsize = 600
     
     # 浠ｇ爜澶氭爣绛惧尯 (Notebook) / 可视化设计区（同位切换）
     self.workspace_switch_frame = tk.Frame(self.right_paned, bg=self.theme_bg, borderwidth=0)
@@ -452,6 +474,7 @@ def setup_ui(self):
         highlightcolor=self.theme_toolbar_border,
         bd=0,
     )
+    self.output_frame = output_frame
 
     self.feedback_notebook = ttk.Notebook(output_frame, padding=0)
     try:
@@ -666,6 +689,7 @@ def setup_ui(self):
     self.feedback_notebook.bind("<<NotebookTabChanged>>", self._on_feedback_tab_changed, add="+")
 
     self.right_paned.add(output_frame, stretch="never", minsize=160)
+    self.designer_workspace_frame = tk.Frame(self.main_paned, bg=self.theme_bg, borderwidth=0)
     self.feedback_notebook.select(console_tab)
     self._refresh_feedback_tab_badges()
     update_feedback_action_bar(self)
@@ -830,28 +854,24 @@ def _refresh_workspace_mode_buttons(owner):
         if mode == "designer":
             code_btn.configure(
                 bg=owner.theme_panel_bg,
-                fg="#C9D4E1",
                 activebackground=owner.theme_toolbar_hover,
-                activeforeground="#FFFFFF",
+                image=getattr(owner, "_mode_code_icon_idle", ""),
             )
             designer_btn.configure(
                 bg="#0E639C",
-                fg="#FFFFFF",
                 activebackground="#1577B8",
-                activeforeground="#FFFFFF",
+                image=getattr(owner, "_mode_design_icon_active", ""),
             )
         else:
             code_btn.configure(
                 bg="#0E639C",
-                fg="#FFFFFF",
                 activebackground="#1577B8",
-                activeforeground="#FFFFFF",
+                image=getattr(owner, "_mode_code_icon_active", ""),
             )
             designer_btn.configure(
                 bg=owner.theme_panel_bg,
-                fg="#C9D4E1",
                 activebackground=owner.theme_toolbar_hover,
-                activeforeground="#FFFFFF",
+                image=getattr(owner, "_mode_design_icon_idle", ""),
             )
     except tk.TclError:
         return
@@ -861,48 +881,103 @@ def switch_workspace_mode(owner, mode="code"):
     target = "designer" if str(mode).strip().lower() in {"designer", "design", "ui", "visual", "可视化"} else "code"
     current = str(getattr(owner, "workspace_mode", "code") or "code")
 
+    main_paned = getattr(owner, "main_paned", None)
+    sidebar_frame = getattr(owner, "sidebar_frame", None)
+    right_paned = getattr(owner, "right_paned", None)
+    workspace_host = getattr(owner, "workspace_switch_frame", None)
+    output_frame = getattr(owner, "output_frame", None)
+    designer_full_frame = getattr(owner, "designer_workspace_frame", None)
     code_frame = getattr(owner, "code_view_frame", None)
-    designer_frame = getattr(owner, "designer_view_frame", None)
-    host = getattr(owner, "workspace_switch_frame", None)
-    if code_frame is None or designer_frame is None or host is None:
+    if None in {main_paned, sidebar_frame, right_paned, workspace_host, output_frame, designer_full_frame, code_frame}:
         owner.workspace_mode = target
         _refresh_workspace_mode_buttons(owner)
         return
 
+    def _pane_exists(paned, widget):
+        try:
+            panes = list(paned.panes() or [])
+        except tk.TclError:
+            return False
+        return str(widget) in {str(item) for item in panes}
+
     if target == "designer":
-        if current != "designer":
+        if _pane_exists(main_paned, sidebar_frame):
             try:
-                code_frame.pack_forget()
+                main_paned.forget(sidebar_frame)
             except tk.TclError:
                 pass
-            panel = ensure_embedded_ui_designer(owner, designer_frame)
+        if _pane_exists(main_paned, right_paned):
             try:
-                panel.pack(fill=tk.BOTH, expand=True)
+                main_paned.forget(right_paned)
             except tk.TclError:
                 pass
+        if not _pane_exists(main_paned, designer_full_frame):
             try:
-                designer_frame.pack(fill=tk.BOTH, expand=True)
+                main_paned.add(designer_full_frame, stretch="always", minsize=640)
             except tk.TclError:
                 pass
+
+        panel = ensure_embedded_ui_designer(owner, designer_full_frame)
+        try:
+            panel.pack(fill=tk.BOTH, expand=True)
+        except tk.TclError:
+            pass
         owner.workspace_mode = "designer"
         if hasattr(owner, "status_main_var"):
             owner.status_main_var.set("已切换到可视化界面设计模式")
     else:
-        if current == "designer":
-            panel = getattr(owner, "_ui_designer_embedded_panel", None)
-            if panel is not None:
-                try:
-                    panel.pack_forget()
-                except tk.TclError:
-                    pass
+        if _pane_exists(main_paned, designer_full_frame):
             try:
-                designer_frame.pack_forget()
+                main_paned.forget(designer_full_frame)
+            except tk.TclError:
+                pass
+
+        if not _pane_exists(main_paned, sidebar_frame):
+            try:
+                main_paned.add(
+                    sidebar_frame,
+                    stretch="never",
+                    minsize=int(getattr(owner, "sidebar_default_width", int(250 * owner.dpi_scale)) or int(250 * owner.dpi_scale)),
+                )
+            except tk.TclError:
+                pass
+        if not _pane_exists(main_paned, right_paned):
+            try:
+                main_paned.add(
+                    right_paned,
+                    stretch="always",
+                    minsize=int(getattr(owner, "right_paned_minsize", 600) or 600),
+                )
+            except tk.TclError:
+                pass
+
+        if not _pane_exists(right_paned, workspace_host):
+            try:
+                right_paned.add(workspace_host, stretch="always", minsize=400)
+            except tk.TclError:
+                pass
+        if not _pane_exists(right_paned, output_frame):
+            try:
+                right_paned.add(output_frame, stretch="never", minsize=160)
+            except tk.TclError:
+                pass
+
+        panel = getattr(owner, "_ui_designer_embedded_panel", None)
+        if panel is not None and current == "designer":
+            try:
+                panel.pack_forget()
             except tk.TclError:
                 pass
         try:
             code_frame.pack(fill=tk.BOTH, expand=True)
         except tk.TclError:
             pass
+        designer_frame = getattr(owner, "designer_view_frame", None)
+        if designer_frame is not None:
+            try:
+                designer_frame.pack_forget()
+            except tk.TclError:
+                pass
         owner.workspace_mode = "code"
         if hasattr(owner, "status_main_var"):
             owner.status_main_var.set("已切换到代码编辑模式")
