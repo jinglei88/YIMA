@@ -62,6 +62,7 @@ from yima.editor_workspace_flow import (
     on_app_close as ui_on_app_close,
     on_tab_changed as ui_on_tab_changed,
     on_tab_click as ui_on_tab_click,
+    on_tab_middle_click as ui_on_tab_middle_click,
     on_tree_double_click as ui_on_tree_double_click,
     popup_tree_menu as ui_popup_tree_menu,
     refresh_file_tree as ui_refresh_file_tree,
@@ -87,7 +88,9 @@ from yima.editor_shortcuts_flow import (
     shortcut_multi_add_next as ui_shortcut_multi_add_next,
     shortcut_multi_select_all as ui_shortcut_multi_select_all,
     shortcut_new as ui_shortcut_new,
+    shortcut_next_tab as ui_shortcut_next_tab,
     shortcut_open as ui_shortcut_open,
+    shortcut_prev_tab as ui_shortcut_prev_tab,
     shortcut_quick_view as ui_shortcut_quick_view,
     shortcut_rename_symbol as ui_shortcut_rename_symbol,
     shortcut_replace as ui_shortcut_replace,
@@ -672,6 +675,12 @@ class 易码IDE:
     def _shortcut_quick_view(self, event=None):
         return ui_shortcut_quick_view(self, event=event)
 
+    def _shortcut_next_tab(self, event=None):
+        return ui_shortcut_next_tab(self, event=event)
+
+    def _shortcut_prev_tab(self, event=None):
+        return ui_shortcut_prev_tab(self, event=event)
+
     def _shortcut_toggle_fold(self, event=None):
         return ui_shortcut_toggle_fold(self, event=event)
 
@@ -797,6 +806,9 @@ class 易码IDE:
                 
     def on_tab_click(self, event):
         return ui_on_tab_click(self, event)
+
+    def on_tab_middle_click(self, event):
+        return ui_on_tab_middle_click(self, event)
 
     def close_tab(self, index):
         return ui_close_tab(self, index)

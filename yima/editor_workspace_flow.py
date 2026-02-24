@@ -20,17 +20,82 @@ from tkinter import messagebox, scrolledtext, simpledialog
 from tkinter import font as tkfont
 
 
+def _infer_tab_span(owner, index, probe_y):
+    """通过坐标扫描推断标签左右边界（规避某些环境下 bbox 恒为 0 的问题）。"""
+    nb = owner.notebook
+    try:
+        idx = int(index)
+    except Exception:
+        return None
+    max_x = max(0, int(nb.winfo_width()) - 1)
+    if max_x <= 0:
+        return None
+
+    y = max(0, int(probe_y))
+    left = None
+    for x in range(0, max_x + 1):
+        try:
+            if int(nb.index(f"@{x},{y}")) == idx:
+                left = x
+                break
+        except Exception:
+            continue
+    if left is None:
+        return None
+
+    right = left
+    for x in range(left + 1, max_x + 1):
+        try:
+            if int(nb.index(f"@{x},{y}")) != idx:
+                right = x - 1
+                break
+            right = x
+        except Exception:
+            right = x - 1
+            break
+    return left, right
+
+
 def on_tab_click(owner, event):
-    """处理标签点击，实现点击右侧 X 关闭标签。"""
+    """处理标签点击：左键优先切换，仅在足够宽且点中最右侧×时关闭。"""
     try:
         index = owner.notebook.index(f"@{event.x},{event.y}")
-        x, _y, width, _height = owner.notebook.bbox(index)
     except tk.TclError:
         return
 
-    close_area_width = int(25 * owner.dpi_scale)
-    if event.x > (x + width - close_area_width):
+    # 左键先切换到点击的标签，保证主交互稳定。
+    try:
+        tabs = owner.notebook.tabs()
+        if 0 <= index < len(tabs):
+            owner.notebook.select(tabs[index])
+    except tk.TclError:
+        pass
+
+    span = _infer_tab_span(owner, index, event.y)
+    if not span:
+        return
+    _left, right = span
+
+    # 右侧关闭热区（仅最右一小段），兼顾可点中与不误触。
+    try:
+        close_font = tkfont.Font(font=owner.font_ui)
+        close_width = max(int(close_font.measure(" × ")), int(12 * owner.dpi_scale))
+    except Exception:
+        close_width = int(12 * owner.dpi_scale)
+    close_width = max(10, int(close_width))
+    close_left = right - close_width + 1
+
+    if event.x >= close_left:
         close_tab(owner, index)
+
+
+def on_tab_middle_click(owner, event):
+    """中键关闭标签，避免左键误触。"""
+    try:
+        index = owner.notebook.index(f"@{event.x},{event.y}")
+    except tk.TclError:
+        return
+    close_tab(owner, index)
 
 
 def close_tab(owner, index):
@@ -52,6 +117,8 @@ def close_tab(owner, index):
 
     if not owner.notebook.tabs():
         owner._create_editor_tab("未命名代码.ym", "")
+    else:
+        owner._update_tab_title(owner.notebook.tabs()[0])
 
 
 def confirm_tab_close(owner, tab_id):

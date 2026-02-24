@@ -38,6 +38,7 @@ def initialize_editor(owner, root):
     self.last_project_dir = None
     self.last_open_file = None
     self.last_session_files = []
+    self.tab_title_max_chars = 16
     self.last_session_views = {}
     self.last_session_folds = {}
     self.last_session_outline_focus = {}
@@ -243,7 +244,7 @@ def initialize_editor(owner, root):
     # 定制 Notebook 标签页无缝沉浸式外观
     style.configure("TNotebook", background=self.theme_bg, borderwidth=0, padding=0)
     # 未选中的标签
-    style.configure("TNotebook.Tab", font=self.font_ui, padding=[15, 6], background="#2D2D30", foreground="#888888", borderwidth=0, focuscolor=self.theme_bg)
+    style.configure("TNotebook.Tab", font=self.font_ui, padding=[6, 4], background="#2D2D30", foreground="#888888", borderwidth=0, focuscolor=self.theme_bg)
     # 选中的标签完美融入背景 (无底边框)
     style.map("TNotebook.Tab", background=[("selected", self.theme_bg)], foreground=[("selected", "#FFFFFF")], expand=[("selected", [0, 1, 0, 0])])
     
@@ -294,13 +295,105 @@ def get_tab_id_by_editor(owner, editor):
     return None
 
 
+def _split_tab_path(filepath):
+    text = str(filepath or "").strip()
+    if not text:
+        return ["未命名代码.ym"]
+    if text == "未命名代码.ym":
+        return [text]
+    normalized = text.replace("\\", "/").strip("/")
+    parts = [x for x in normalized.split("/") if x]
+    return parts if parts else [text]
+
+
+def _compact_tab_leaf(name):
+    text = str(name or "")
+    if text.lower().endswith(".ym"):
+        return text[:-3]
+    return text
+
+
+def _middle_ellipsis(text, max_chars):
+    raw = str(text or "")
+    limit = max(8, int(max_chars or 0))
+    if len(raw) <= limit:
+        return raw
+    keep = limit - 1
+    left = max(2, keep // 2)
+    right = max(2, keep - left)
+    return f"{raw[:left]}…{raw[-right:]}"
+
+
+def _build_tab_display_name_map(owner):
+    tab_ids = [tab_id for tab_id in owner.notebook.tabs() if tab_id in owner.tabs_data]
+    if not tab_ids:
+        return {}
+
+    parts_map = {}
+    groups = {}
+    for tab_id in tab_ids:
+        filepath = owner.tabs_data[tab_id].get("filepath", "未命名代码.ym")
+        parts = _split_tab_path(filepath)
+        parts_map[tab_id] = parts
+        base = _compact_tab_leaf(parts[-1]) if parts else "未命名代码"
+        groups.setdefault(base, []).append(tab_id)
+
+    display = {}
+    for base, group in groups.items():
+        if len(group) == 1:
+            display[group[0]] = base
+            continue
+
+        unresolved = set(group)
+        level = 1
+        while unresolved:
+            buckets = {}
+            for tab_id in unresolved:
+                parts = parts_map.get(tab_id, [base])
+                take = min(len(parts), level + 1)
+                if take > 0:
+                    tail = list(parts[-take:])
+                    tail[-1] = _compact_tab_leaf(tail[-1])
+                    candidate = "/".join(tail)
+                else:
+                    candidate = base
+                buckets.setdefault(candidate, []).append(tab_id)
+
+            next_unresolved = set()
+            for candidate, tids in buckets.items():
+                if len(tids) == 1:
+                    display[tids[0]] = candidate
+                else:
+                    next_unresolved.update(tids)
+
+            if next_unresolved == unresolved:
+                for idx, tab_id in enumerate(sorted(unresolved), 1):
+                    display[tab_id] = f"{base}#{idx}"
+                break
+
+            unresolved = next_unresolved
+            level += 1
+
+    return display
+
+
 def update_tab_title(owner, tab_id):
-    if tab_id not in owner.tabs_data:
-        return
-    filepath = owner.tabs_data[tab_id].get("filepath", "未命名代码.ym")
-    display_name = os.path.basename(filepath) if filepath != "未命名代码.ym" else "未命名代码.ym"
-    dirty_prefix = "● " if owner.tabs_data[tab_id].get("dirty") else ""
-    try:
-        owner.notebook.tab(tab_id, text=f" {dirty_prefix}{display_name}   ✖ ")
-    except tk.TclError:
+    if tab_id not in owner.tabs_data and owner.tabs_data:
+        # 允许在关闭标签后触发全量刷新。
         pass
+    display_map = _build_tab_display_name_map(owner)
+    if not display_map:
+        return
+    max_chars = int(getattr(owner, "tab_title_max_chars", 16) or 16)
+    tab_count = len(display_map)
+    if tab_count >= 12:
+        max_chars = min(max_chars, 12)
+    elif tab_count >= 8:
+        max_chars = min(max_chars, 14)
+    for tid, display_name in display_map.items():
+        dirty_prefix = "● " if owner.tabs_data.get(tid, {}).get("dirty") else ""
+        visible_name = _middle_ellipsis(display_name, max_chars)
+        try:
+            owner.notebook.tab(tid, text=f" {dirty_prefix}{visible_name} × ")
+        except tk.TclError:
+            continue

@@ -32,6 +32,9 @@ def bind_global_shortcuts(owner):
     owner.root.bind("<Control-Shift-r>", owner._shortcut_rename_symbol)
     owner.root.bind("<Control-Shift-Q>", owner._shortcut_quick_view)
     owner.root.bind("<Control-Shift-q>", owner._shortcut_quick_view)
+    owner.root.bind("<Control-Tab>", owner._shortcut_next_tab)
+    owner.root.bind("<Control-Shift-Tab>", owner._shortcut_prev_tab)
+    owner.root.bind("<Control-ISO_Left_Tab>", owner._shortcut_prev_tab)
     owner.root.bind("<Alt-f>", owner._shortcut_toggle_fold)
     owner.root.bind("<Alt-u>", owner._shortcut_unfold_all)
 
@@ -86,6 +89,34 @@ def shortcut_quick_view(owner, event=None):
     owner._refresh_quick_view()
     owner.status_main_var.set("快速查看已刷新")
     return "break"
+
+
+def _cycle_tab(owner, step):
+    tabs = list(owner.notebook.tabs() or [])
+    if len(tabs) <= 1:
+        return "break"
+    current = owner._get_current_tab_id()
+    try:
+        idx = tabs.index(current)
+    except ValueError:
+        idx = 0
+    target = tabs[(idx + int(step)) % len(tabs)]
+    try:
+        owner.notebook.select(target)
+    except Exception:
+        return "break"
+    owner.on_tab_changed(None)
+    return "break"
+
+
+def shortcut_next_tab(owner, event=None):
+    del event
+    return _cycle_tab(owner, 1)
+
+
+def shortcut_prev_tab(owner, event=None):
+    del event
+    return _cycle_tab(owner, -1)
 
 
 def shortcut_toggle_fold(owner, event=None):

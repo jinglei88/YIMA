@@ -378,8 +378,17 @@ def setup_ui(self):
     editor_frame = tk.Frame(self.right_paned, bg=self.theme_bg, borderwidth=0)
     
     self.notebook = ttk.Notebook(editor_frame, padding=0)
+    try:
+        # 某些 Tk 版本会让 PanedWindow 的 sashcursor 影响到子控件，显式设置标签区光标避免出现上下箭头。
+        self.notebook.configure(cursor="arrow")
+    except tk.TclError:
+        pass
     self.notebook.pack(fill=tk.BOTH, expand=True)
+    self.notebook.bind("<Enter>", lambda _e: self.notebook.configure(cursor="arrow"), add="+")
+    self.notebook.bind("<Leave>", lambda _e: self.notebook.configure(cursor=""), add="+")
     self.notebook.bind("<Button-1>", self.on_tab_click)
+    self.notebook.bind("<Button-2>", self.on_tab_middle_click, add="+")
+    self.notebook.bind("<ButtonRelease-2>", self.on_tab_middle_click, add="+")
     
     self.right_paned.add(editor_frame, stretch="always", minsize=400)
     
@@ -394,6 +403,10 @@ def setup_ui(self):
     )
 
     self.feedback_notebook = ttk.Notebook(output_frame, padding=0)
+    try:
+        self.feedback_notebook.configure(cursor="arrow")
+    except tk.TclError:
+        pass
     self.feedback_notebook.pack(fill=tk.BOTH, expand=True)
 
     # 反馈页签右上角操作区：利用页签右侧空白，按当前页签展示操作
