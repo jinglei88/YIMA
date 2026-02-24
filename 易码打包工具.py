@@ -550,6 +550,10 @@ if __name__ == '__main__':
         "tkinter.ttk",
         "tkinter.simpledialog",
         "tkinter.font",
+        # 本地数据库能力在解释器中为延迟导入，需强制打包 sqlite 相关模块
+        "sqlite3",
+        "sqlite3.dbapi2",
+        "_sqlite3",
     }
     自动隐藏导入.update(依赖图.get("python模块", []))
     自动隐藏导入.update(_分析隐式Python依赖(分析样本, 打包根目录))

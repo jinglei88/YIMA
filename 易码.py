@@ -68,6 +68,11 @@ def 执行源码(代码, interactive=True, shared_env=None, 源码路径=None):
         return True
         
     except 易码错误 as e:
+        if 源码路径 and not getattr(e, "文件路径", None):
+            try:
+                e.文件路径 = os.path.abspath(源码路径)
+            except Exception:
+                pass
         print(e)
         return False
     except Exception as e:

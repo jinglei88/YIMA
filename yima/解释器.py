@@ -85,40 +85,47 @@ class 解释器:
         return (os.path.abspath(绝对路径), 修改时间, id(根环境))
 
     def _加载易码模块(self, 绝对路径: str, 环境上下文: 环境):
+        from .错误 import 易码错误
+
         根环境 = self._获取根环境(环境上下文)
         缓存键 = self._生成模块缓存键(绝对路径, 根环境)
         if 缓存键 in self._模块缓存:
             return self._模块缓存[缓存键]
 
-        with open(绝对路径, 'r', encoding='utf-8') as f:
-            源码 = f.read()
+        try:
+            with open(绝对路径, 'r', encoding='utf-8') as f:
+                源码 = f.read()
 
-        from .词法分析 import 词法分析器
-        from .语法分析 import 语法分析器
+            from .词法分析 import 词法分析器
+            from .语法分析 import 语法分析器
 
-        模块Tokens = 词法分析器(源码).分析()
-        模块AST = 语法分析器(模块Tokens).解析()
+            模块Tokens = 词法分析器(源码).分析()
+            模块AST = 语法分析器(模块Tokens).解析()
 
-        # 模块执行环境采用“父环境继承 + 本地隔离”：
-        # 1) 可直接访问内置能力/主程序全局；
-        # 2) 模块内部赋值不回写到主程序全局；
-        # 3) 导出符号仅来自模块本地记录本，避免混入父环境。
-        模块环境 = 环境(爸爸环境=根环境, 禁止向上赋值=True)
+            # 模块执行环境采用“父环境继承 + 本地隔离”：
+            # 1) 可直接访问内置能力/主程序全局；
+            # 2) 模块内部赋值不回写到主程序全局；
+            # 3) 导出符号仅来自模块本地记录本，避免混入父环境。
+            模块环境 = 环境(爸爸环境=根环境, 禁止向上赋值=True)
 
-        子解释器 = 解释器(严格局部作用域=self.严格局部作用域)
-        子解释器.全局环境 = 模块环境
-        子解释器._模块缓存 = self._模块缓存
-        子解释器.设置当前目录(os.path.dirname(绝对路径))
-        子解释器.执行代码(模块AST)
+            子解释器 = 解释器(严格局部作用域=self.严格局部作用域)
+            子解释器.全局环境 = 模块环境
+            子解释器._模块缓存 = self._模块缓存
+            子解释器.设置当前目录(os.path.dirname(绝对路径))
+            子解释器.执行代码(模块AST)
 
-        模块导出 = dict(模块环境.记录本)
+            模块导出 = dict(模块环境.记录本)
 
-        缓存值 = {
-            "导出": 模块导出,
-            "全量": dict(模块环境.记录本),
-        }
-        self._模块缓存[缓存键] = 缓存值
-        return 缓存值
+            缓存值 = {
+                "导出": 模块导出,
+                "全量": dict(模块环境.记录本),
+            }
+            self._模块缓存[缓存键] = 缓存值
+            return 缓存值
+        except 易码错误 as e:
+            if not getattr(e, "文件路径", None):
+                e.文件路径 = os.path.abspath(绝对路径)
+            raise
 
     def _内置模块命名空间(self, 模块名: str, 环境上下文: 环境):
         根环境 = self._获取根环境(环境上下文)
@@ -1062,6 +1069,9 @@ class 解释器:
             # 某些打包环境下 `from tkinter import ttk` / `import tkinter.ttk`
             # 其中一种可能失效，做双通道兜底。
             from tkinter import ttk
+
+        def _取挂载容器(窗口或容器):
+            return getattr(窗口或容器, "_易码滚动内容框", 窗口或容器)
         
         def _创建窗口(标题="易码程序", 宽=400, 高=300):
             窗口 = tk.Tk()
@@ -1073,15 +1083,71 @@ class 解释器:
                 windll.shcore.SetProcessDpiAwareness(1)
             except Exception:
                 pass
+
+            # 为长表单默认启用垂直滚动容器：不改用户代码即可滚动查看底部内容。
+            主容器 = tk.Frame(窗口)
+            主容器.pack(fill=tk.BOTH, expand=True)
+
+            滚动画布 = tk.Canvas(主容器, highlightthickness=0, borderwidth=0)
+            纵向滚动条 = ttk.Scrollbar(主容器, orient="vertical", command=滚动画布.yview)
+            滚动画布.configure(yscrollcommand=纵向滚动条.set)
+
+            滚动画布.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            纵向滚动条.pack(side=tk.RIGHT, fill=tk.Y)
+
+            内容框 = tk.Frame(滚动画布)
+            内容框窗口 = 滚动画布.create_window((0, 0), window=内容框, anchor="nw")
+
+            def _更新滚动区域(_event=None):
+                try:
+                    边界 = 滚动画布.bbox("all")
+                    if 边界:
+                        滚动画布.configure(scrollregion=边界)
+                except Exception:
+                    pass
+
+            def _同步内容宽度(event):
+                try:
+                    滚动画布.itemconfigure(内容框窗口, width=event.width)
+                except Exception:
+                    pass
+
+            def _滚轮滚动(event):
+                try:
+                    if hasattr(event, "delta") and event.delta:
+                        步数 = int(-event.delta / 120)
+                    elif getattr(event, "num", None) == 4:
+                        步数 = -1
+                    elif getattr(event, "num", None) == 5:
+                        步数 = 1
+                    else:
+                        步数 = 0
+                    if 步数:
+                        滚动画布.yview_scroll(步数, "units")
+                        return "break"
+                except Exception:
+                    return None
+
+            内容框.bind("<Configure>", _更新滚动区域)
+            滚动画布.bind("<Configure>", _同步内容宽度)
+            窗口.bind("<MouseWheel>", _滚轮滚动, add="+")
+            窗口.bind("<Button-4>", _滚轮滚动, add="+")
+            窗口.bind("<Button-5>", _滚轮滚动, add="+")
+
+            窗口._易码滚动画布 = 滚动画布
+            窗口._易码滚动内容框 = 内容框
+            窗口._易码更新滚动区域 = _更新滚动区域
             return 窗口
             
         def _加上文字(窗口, 内容):
-            标签 = tk.Label(窗口, text=内容, font=("Microsoft YaHei", 12))
+            父容器 = _取挂载容器(窗口)
+            标签 = tk.Label(父容器, text=内容, font=("Microsoft YaHei", 12))
             标签.pack(pady=5)
             return 标签
             
         def _加上输入框(窗口):
-            输入框 = tk.Entry(窗口, font=("Microsoft YaHei", 12))
+            父容器 = _取挂载容器(窗口)
+            输入框 = tk.Entry(父容器, font=("Microsoft YaHei", 12))
             输入框.pack(pady=5)
             return 输入框
             
@@ -1091,18 +1157,22 @@ class 解释器:
         def _修改文字(标签, 新内容):
             标签.config(text=新内容)
             
-        def _加上按钮(窗口, 文字, 绑定的函数名):
+        def _加上按钮(窗口, 文字, 绑定的函数名, _易码环境=None):
+            回调环境 = _易码环境 if _易码环境 is not None else self.全局环境
+
             def 点击动作():
                 try:
                     from .语法树 import 函数调用节点
                     虚拟调用 = 函数调用节点(绑定的函数名, [], 行号=0)
-                    self._做_函数调用节点(虚拟调用, self.全局环境)
+                    self._做_函数调用节点(虚拟调用, 回调环境)
                 except Exception as e:
                     messagebox.showerror("按钮执行失败", f"未找到目标函数或执行失败：{e}")
                     
-            按钮 = tk.Button(窗口, text=文字, font=("Microsoft YaHei", 12), command=点击动作)
+            父容器 = _取挂载容器(窗口)
+            按钮 = tk.Button(父容器, text=文字, font=("Microsoft YaHei", 12), command=点击动作)
             按钮.pack(pady=5)
             return 按钮
+        _加上按钮._易码需要环境 = True
             
         def _弹窗提醒(标题, 内容):
             messagebox.showinfo(标题, 内容)
@@ -1112,6 +1182,12 @@ class 解释器:
             return 结果 if 结果 is not None else ""
             
         def _展示窗口(窗口):
+            更新滚动 = getattr(窗口, "_易码更新滚动区域", None)
+            if callable(更新滚动):
+                try:
+                    更新滚动()
+                except Exception:
+                    pass
             窗口.mainloop()
 
         def _规范列名(列定义):
@@ -1201,7 +1277,8 @@ class 解释器:
             样式.configure(样式名, font=内容字体, rowheight=行高)
             样式.configure(f"{样式名}.Heading", font=表头字体)
 
-            容器 = tk.Frame(窗口)
+            父容器 = _取挂载容器(窗口)
+            容器 = tk.Frame(父容器)
             容器.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
 
             表格 = ttk.Treeview(容器, columns=列名, show="headings", selectmode="browse", height=高度值, style=样式名)
@@ -1616,6 +1693,8 @@ class 解释器:
             传入的参数值 = []
             for 参数表达式 in 节点.参数列表:
                 传入的参数值.append(self.执行(参数表达式, 环境上下文))
+            if getattr(函数定义, "_易码需要环境", False):
+                return 函数定义(*传入的参数值, _易码环境=环境上下文)
             return 函数定义(*传入的参数值)
             
         # 2. 普通易码函数
@@ -1638,6 +1717,8 @@ class 解释器:
             
         # 1. 检查是不是 Python 原生或库函数
         if hasattr(可调用对象, '__call__'):
+            if getattr(可调用对象, "_易码需要环境", False):
+                return 可调用对象(*传入的参数值, _易码环境=环境上下文)
             return 可调用对象(*传入的参数值)
             
         # 2. 普通易码函数 (定义函数节点)
@@ -1686,7 +1767,7 @@ class 解释器:
             except 易码错误:
                 raise
             except Exception as e:
-                raise 运行报错(f"加载模块失败：{e}", 节点.行号)
+                raise 运行报错(f"加载模块失败（{绝对路径}）：{e}", 节点.行号)
 
             环境上下文.记住(注册名, 按统一引入规则取值(模块缓存项["导出"]))
             return 空值()
@@ -1719,7 +1800,7 @@ class 解释器:
             except 易码错误:
                 raise
             except Exception as e:
-                raise 运行报错(f"加载模块失败：{e}", 节点.行号)
+                raise 运行报错(f"加载模块失败（{绝对路径}）：{e}", 节点.行号)
 
             模块全量符号 = 模块缓存项["全量"]
 

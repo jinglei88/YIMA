@@ -15,12 +15,13 @@ __marker_id__ = "YIMA-JINGLEI-CORE"
 
 class 易码错误(Exception):
     """易码所有异常的基类"""
-    def __init__(self, 错误类型, 消息, 行号=None, 列号=None, 建议=None):
+    def __init__(self, 错误类型, 消息, 行号=None, 列号=None, 建议=None, 文件路径=None):
         self.错误类型 = 错误类型
         self.消息 = 消息
         self.行号 = 行号
         self.列号 = 列号
         self.建议 = 建议
+        self.文件路径 = 文件路径
 
     def _位置文本(self):
         if self.行号 and self.列号:
@@ -70,6 +71,8 @@ class 易码错误(Exception):
         位置 = self._位置文本()
         建议 = self.建议 if self.建议 else self._自动建议()
         文本 = [f"{self.错误类型}{位置}：", f"  原因：{self.消息}"]
+        if self.文件路径:
+            文本.insert(1, f"  文件：{self.文件路径}")
         if 建议:
             文本.append(f"  建议：{建议}")
         return "\n".join(文本)
