@@ -210,6 +210,7 @@ def setup_ui(self):
         ("重命名", self.rename_symbol),
     ])
     create_tool_group("文档", [
+        ("示例中心", self.open_examples),
         ("速查表", self.open_cheatsheet),
     ])
 
@@ -607,8 +608,25 @@ def setup_ui(self):
     self._clear_output_console(keep_intro=True)
 
     # 底部状态栏（当前文件 / 语法诊断 / 光标位置）
-    status_bar = tk.Frame(
+    # 外层包裹容器：让底部信息区与主体区域形成稳定的视觉分层。
+    status_wrap = tk.Frame(
         self.root,
+        bg=self.theme_bg,
+        padx=6,
+        pady=0,
+        bd=0,
+        highlightthickness=0,
+    )
+    status_wrap.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 4))
+    # 关键：重排 pack 顺序，确保状态栏先占底部高度，再让主分割区填充剩余空间。
+    try:
+        self.main_paned.pack_forget()
+    except tk.TclError:
+        pass
+    self.main_paned.pack(fill=tk.BOTH, expand=True)
+
+    status_bar = tk.Frame(
+        status_wrap,
         bg="#171C23",
         height=int(28 * self.dpi_scale),
         highlightthickness=1,
@@ -616,7 +634,7 @@ def setup_ui(self):
         highlightcolor=self.theme_toolbar_border,
         bd=0,
     )
-    status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+    status_bar.pack(fill=tk.X)
     status_bar.pack_propagate(False)
 
     self.status_main_var = tk.StringVar(value="就绪")

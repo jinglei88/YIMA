@@ -58,6 +58,9 @@ def initialize_editor(owner, root):
     self._cheatsheet_headings_visible = []
     self._cheatsheet_quick_items_all = []
     self._cheatsheet_quick_items_visible = []
+    self._examples_window = None
+    self._examples_items_all = []
+    self._examples_items_visible = []
     self.find_dialog = None
     self.find_var = tk.StringVar(value="")
     self.replace_var = tk.StringVar(value="")

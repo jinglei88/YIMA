@@ -111,6 +111,7 @@ def compile_check() -> None:
         "yima/错误.py",
         "yima/信号.py",
         "yima/editor_cheatsheet_flow.py",
+        "yima/editor_examples_flow.py",
     ]
     with tempfile.TemporaryDirectory(prefix="yima_pycache_", dir=ROOT) as td:
         run_cmd([PY, "-m", "py_compile", *files], env={"PYTHONPYCACHEPREFIX": td})
@@ -279,12 +280,19 @@ def packaging_regression_check() -> None:
     print("[OK] 打包专项回归通过")
 
 
+def examples_catalog_regression_check() -> None:
+    out = run_cmd([PY, "scripts/run_examples_catalog_regression.py"])
+    assert_contains(out, "示例目录与分类回归完成：全部通过", "示例目录与分类回归")
+    print("[OK] 示例目录与分类回归通过")
+
+
 def main() -> int:
     print("=== 易码回归开始 ===")
     compile_check()
     sample_check()
     semantic_check()
     cli_contract_check()
+    examples_catalog_regression_check()
     error_regression_check()
     editor_logic_regression_check()
     packaging_regression_check()

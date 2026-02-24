@@ -244,6 +244,7 @@ from yima.editor_cheatsheet_flow import (
     refresh_cheatsheet_quick_panel as ui_refresh_cheatsheet_quick_panel,
     setup_cheatsheet_quick_section as ui_setup_cheatsheet_quick_section,
 )
+from yima.editor_examples_flow import open_examples as ui_open_examples
 
 class 易码IDE:
     def __init__(self, root):
@@ -856,6 +857,9 @@ class 易码IDE:
 
     def open_cheatsheet(self, event=None):
         return ui_open_cheatsheet(self, event=event)
+
+    def open_examples(self, event=None):
+        return ui_open_examples(self, event=event)
 
     def _refresh_cheatsheet(self, event=None):
         return ui_refresh_cheatsheet(self, event=event)
