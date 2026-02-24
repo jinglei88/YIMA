@@ -17,6 +17,7 @@ __marker_id__ = "YIMA-JINGLEI-CORE"
 import sys
 import tempfile
 from pathlib import Path
+import os
 from types import MethodType
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +51,11 @@ from yima.editor_logic_core import (
     rank_word_completion_candidates,
     resolve_call_expression_signature,
     split_signature_params,
+)
+from yima.editor_project_flow import (
+    load_project_state as flow_load_project_state,
+    restore_project_open_tabs as flow_restore_project_open_tabs,
+    save_project_state as flow_save_project_state,
 )
 
 
@@ -723,6 +729,112 @@ def check_word_completion_helper_rules() -> None:
     _assert_true(var_map["\u7ed3\u679c"]["source"] == "variable", f"local variable source mismatch: {var_map}")
     print("[OK] word completion helper rules passed")
 
+
+def check_project_session_state_rules() -> None:
+    class NotebookStub:
+        def __init__(self):
+            self._tabs = []
+            self._selected = None
+
+        def tabs(self):
+            return list(self._tabs)
+
+        def select(self, tab_id=None):
+            if tab_id is None:
+                return self._selected
+            self._selected = tab_id
+            return self._selected
+
+    class OwnerStub:
+        pass
+
+    with tempfile.TemporaryDirectory(prefix="yima_project_state_") as td:
+        root = Path(td)
+        project = root / "proj"
+        project.mkdir(parents=True, exist_ok=True)
+        file_a = project / "a.ym"
+        file_b = project / "b.ym"
+        file_c = project / "c.ym"
+        file_a.write_text('?? "A"\n', encoding="utf-8")
+        file_b.write_text('?? "B"\n', encoding="utf-8")
+        file_c.write_text('?? "C"\n', encoding="utf-8")
+
+        def new_owner():
+            owner = OwnerStub()
+            owner._state_dir = str(root / ".state")
+            owner._state_file = str(Path(owner._state_dir) / "editor_state.json")
+            owner.workspace_dir = str(project)
+            owner.recent_projects = []
+            owner.last_project_dir = None
+            owner.last_open_file = None
+            owner.last_session_files = []
+            owner.tabs_data = {}
+            owner.notebook = NotebookStub()
+            owner.print_output = lambda *_args, **_kwargs: None
+            owner._normalize_file_path = lambda p: str(Path(p).resolve()) if Path(p).is_file() else None
+
+            def _get_current_tab_id():
+                return owner.notebook.select()
+
+            owner._get_current_tab_id = _get_current_tab_id
+
+            def _create_editor_tab(filepath, _content=""):
+                for tab_id, data in owner.tabs_data.items():
+                    if os.path.normcase(str(data.get("filepath") or "")) == os.path.normcase(str(filepath)):
+                        owner.notebook.select(tab_id)
+                        return
+                tab_id = f"tab-{len(owner.tabs_data) + 1}"
+                owner.tabs_data[tab_id] = {"filepath": str(filepath)}
+                owner.notebook._tabs.append(tab_id)
+                owner.notebook.select(tab_id)
+
+            owner._create_editor_tab = _create_editor_tab
+            return owner
+
+        owner = new_owner()
+        owner.last_project_dir = str(project)
+        owner.recent_projects = [str(project)]
+        owner._create_editor_tab(str(file_a), file_a.read_text(encoding="utf-8"))
+        owner._create_editor_tab(str(file_b), file_b.read_text(encoding="utf-8"))
+        owner.notebook.select("tab-1")
+
+        flow_save_project_state(owner)
+
+        loaded = new_owner()
+        flow_load_project_state(loaded)
+
+        _assert_true(
+            os.path.normcase(str(file_a)) == os.path.normcase(str(loaded.last_open_file or "")),
+            f"project state active file mismatch: {loaded.last_open_file}",
+        )
+        _assert_true(
+            [os.path.normcase(p) for p in loaded.last_session_files]
+            == [os.path.normcase(str(file_a)), os.path.normcase(str(file_b))],
+            f"project state open files mismatch: {loaded.last_session_files}",
+        )
+
+        restore_owner = new_owner()
+        restore_owner._create_editor_tab(str(file_a), file_a.read_text(encoding="utf-8"))
+        restored_count = flow_restore_project_open_tabs(
+            restore_owner,
+            str(project),
+            [str(file_a), str(file_b), str(file_c)],
+            preferred_file=str(file_a),
+        )
+        opened = [os.path.normcase(str(v.get("filepath") or "")) for v in restore_owner.tabs_data.values()]
+        _assert_true(
+            os.path.normcase(str(file_b)) in opened and os.path.normcase(str(file_c)) in opened,
+            f"project session restore should open extra files: {opened}",
+        )
+        _assert_true(restored_count == 2, f"project session restore count mismatch: {restored_count}")
+        selected_tab = restore_owner.notebook.select()
+        selected_file = restore_owner.tabs_data.get(selected_tab, {}).get("filepath")
+        _assert_true(
+            os.path.normcase(str(selected_file or "")) == os.path.normcase(str(file_a)),
+            f"project session restore should keep preferred tab active: {selected_file}",
+        )
+    print("[OK] project session state rules passed")
+
 def main() -> int:
     print("=== 编辑器逻辑回归开始 ===")
     check_autocomplete_rules()
@@ -739,6 +851,7 @@ def main() -> int:
     check_call_signature_helper_rules()
     check_member_completion_helper_rules()
     check_word_completion_helper_rules()
+    check_project_session_state_rules()
     print("=== 编辑器逻辑回归完成：全部通过 ===")
     return 0
 

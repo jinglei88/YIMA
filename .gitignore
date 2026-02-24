@@ -11,6 +11,7 @@ venv/
 
 # Logs and temp artifacts
 *.log
+*.db
 out.txt
 err.txt
 output.log
