@@ -77,14 +77,14 @@ def _prompt_input_dialog(owner, prompt_text: str = ""):
     y = owner.root.winfo_y() + (owner.root.winfo_height() // 2) - (win_h // 2)
     dialog.geometry(f"{win_w}x{win_h}+{x}+{y}")
 
-    result = {"value": None}
+    result: list[str | None] = [None]
 
     def confirm(*_):
-        result["value"] = input_entry.get()
+        result[0] = input_entry.get()
         dialog.destroy()
 
     def cancel(*_):
-        result["value"] = None
+        result[0] = None
         dialog.destroy()
 
     dialog.protocol("WM_DELETE_WINDOW", cancel)
@@ -160,12 +160,21 @@ def _prompt_input_dialog(owner, prompt_text: str = ""):
         owner.root.wait_window(dialog)
     except tk.TclError:
         return None
-    return result["value"]
+    return result[0]
 
 
 def run_code(owner):
     editor = owner._get_current_editor()
     if not editor:
+        try:
+            owner.print_output("提示：当前没有可运行的代码标签页。", notify=True)
+        except Exception:
+            pass
+        if hasattr(owner, "status_main_var"):
+            try:
+                owner.status_main_var.set("运行取消：未找到代码标签页")
+            except Exception:
+                pass
         return
 
     tab_id = owner._get_current_tab_id()

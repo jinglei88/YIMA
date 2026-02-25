@@ -44,12 +44,15 @@ def main() -> int:
             "yima/editor_runtime_guard.py",
             "yima/editor_search_flow.py",
             "yima/editor_shortcuts_flow.py",
+            "yima/editor_ui_designer_flow.py",
             "scripts/run_editor_logic_regression.py",
+            "scripts/run_ui_designer_template_regression.py",
             "scripts/_console_utf8.py",
         ]
     )
     print("[OK] py_compile 通过", flush=True)
     _run([sys.executable, "scripts/run_editor_logic_regression.py"])
+    _run([sys.executable, "scripts/run_ui_designer_template_regression.py"])
     print("=== 快速检查完成：全部通过 ===", flush=True)
     return 0
 

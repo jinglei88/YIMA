@@ -1129,7 +1129,7 @@ class 解释器:
         def _取挂载容器(窗口或容器):
             return getattr(窗口或容器, "_易码滚动内容框", 窗口或容器)
         
-        def _创建窗口(标题="易码程序", 宽=400, 高=300):
+        def _创建窗口(标题="易码程序", 宽=400, 高=300, 滚动条="自动"):
             现有根窗口 = getattr(tk, "_default_root", None)
             已有根窗口可用 = False
             if 现有根窗口 is not None:
@@ -1181,9 +1181,35 @@ class 解释器:
             滚动画布.configure(yscrollcommand=纵向滚动条.set)
 
             滚动画布.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            纵向滚动条.pack(side=tk.RIGHT, fill=tk.Y)
+
+            模式文本 = str(滚动条 or "自动").strip().lower()
+            if 模式文本 in {"无", "关闭", "off", "none", "no", "false", "0"}:
+                滚动模式 = "off"
+            elif 模式文本 in {"总是", "始终", "always", "on", "true", "1"}:
+                滚动模式 = "always"
+            else:
+                滚动模式 = "auto"
+
+            滚动条状态 = {"显示": False}
+
+            def _设置滚动条显示(显示):
+                需要显示 = bool(显示)
+                已显示 = bool(滚动条状态.get("显示", False))
+                if 需要显示 and (not 已显示):
+                    try:
+                        纵向滚动条.pack(side=tk.RIGHT, fill=tk.Y)
+                        滚动条状态["显示"] = True
+                    except Exception:
+                        pass
+                elif (not 需要显示) and 已显示:
+                    try:
+                        纵向滚动条.pack_forget()
+                        滚动条状态["显示"] = False
+                    except Exception:
+                        pass
 
             内容框 = tk.Frame(滚动画布, bg=主题["内容背景"], padx=16, pady=14)
+            内容框._易码绝对布局容器 = True
             内容框窗口 = 滚动画布.create_window((0, 0), window=内容框, anchor="nw")
 
             def _更新滚动区域(_event=None):
@@ -1191,6 +1217,14 @@ class 解释器:
                     边界 = 滚动画布.bbox("all")
                     if 边界:
                         滚动画布.configure(scrollregion=边界)
+                    内容高 = max(0, int((边界[3] - 边界[1]) if 边界 else 0))
+                    画布高 = max(0, int(滚动画布.winfo_height() or 0))
+                    if 滚动模式 == "always":
+                        _设置滚动条显示(True)
+                    elif 滚动模式 == "off":
+                        _设置滚动条显示(False)
+                    else:
+                        _设置滚动条显示(内容高 > (画布高 + 2))
                 except Exception:
                     pass
 
@@ -1221,6 +1255,9 @@ class 解释器:
             窗口.bind("<MouseWheel>", _滚轮滚动, add="+")
             窗口.bind("<Button-4>", _滚轮滚动, add="+")
             窗口.bind("<Button-5>", _滚轮滚动, add="+")
+
+            if 滚动模式 == "always":
+                _设置滚动条显示(True)
 
             窗口._易码滚动画布 = 滚动画布
             窗口._易码滚动内容框 = 内容框
@@ -1416,19 +1453,64 @@ class 解释器:
                 return 输入框.get()
             except Exception:
                 return ""
+
+        def _写入输入(输入框, 内容=""):
+            if 输入框 is None:
+                return ""
+            文本 = str(内容 if 内容 is not None else "")
+            if isinstance(输入框, tk.Text):
+                try:
+                    输入框.delete("1.0", "end")
+                    if 文本:
+                        输入框.insert("1.0", 文本)
+                    return 文本
+                except Exception:
+                    return ""
+            try:
+                输入框.delete(0, tk.END)
+            except Exception:
+                pass
+            try:
+                if 文本:
+                    输入框.insert(0, 文本)
+            except Exception:
+                pass
+            return 文本
             
         def _修改文字(标签, 新内容):
             标签.config(text=新内容)
 
-        def _创建主题按钮(父容器, 主题, 文字, 回调=None, 锚点="w"):
+        def _创建主题按钮(父容器, 主题, 文字, 回调=None, 锚点="w", 样式="主按钮"):
+            样式文本 = str(样式 or "主按钮").strip().lower()
+            主色 = str(主题["强调色"])
+            主悬停 = str(主题["强调悬停色"])
+            按钮字色 = str(主题["按钮文字"])
+            次色 = "#2C3E55"
+            次悬停 = "#35506F"
+            危险色 = "#C0392B"
+            危险悬停 = "#A93226"
+            朴素色 = str(主题["内容背景"])
+            朴素悬停 = "#22324A"
+            朴素字色 = str(主题["文字颜色"])
+
+            背景色 = 主色
+            悬停色 = 主悬停
+            字色 = 按钮字色
+            if 样式文本 in {"次", "次按钮", "secondary", "second"}:
+                背景色, 悬停色, 字色 = 次色, 次悬停, "#EAF2FF"
+            elif 样式文本 in {"危险", "危险按钮", "danger", "warn", "warning"}:
+                背景色, 悬停色, 字色 = 危险色, 危险悬停, "#FFFFFF"
+            elif 样式文本 in {"朴素", "朴素按钮", "plain", "ghost", "text"}:
+                背景色, 悬停色, 字色 = 朴素色, 朴素悬停, 朴素字色
+
             按钮 = tk.Button(
                 父容器,
                 text=str(文字),
                 font=("Microsoft YaHei", 11, "bold"),
-                bg=主题["强调色"],
-                fg=主题["按钮文字"],
-                activebackground=主题["强调悬停色"],
-                activeforeground=主题["按钮文字"],
+                bg=背景色,
+                fg=字色,
+                activebackground=悬停色,
+                activeforeground=字色,
                 relief="flat",
                 bd=0,
                 highlightthickness=0,
@@ -1438,11 +1520,11 @@ class 解释器:
                 command=回调 if callable(回调) else (lambda: None),
             )
             按钮.pack(anchor=str(锚点 or "w"), pady=(2, 10))
-            按钮.bind("<Enter>", lambda _e: 按钮.configure(bg=主题["强调悬停色"]), add="+")
-            按钮.bind("<Leave>", lambda _e: 按钮.configure(bg=主题["强调色"]), add="+")
+            按钮.bind("<Enter>", lambda _e: 按钮.configure(bg=悬停色), add="+")
+            按钮.bind("<Leave>", lambda _e: 按钮.configure(bg=背景色), add="+")
             return 按钮
             
-        def _加上按钮(窗口, 文字, 绑定的函数名, _易码环境=None):
+        def _加上按钮(窗口, 文字, 绑定的函数名, 样式="主按钮", _易码环境=None):
             回调环境 = _易码环境 if _易码环境 is not None else self.全局环境
 
             def 点击动作():
@@ -1452,10 +1534,10 @@ class 解释器:
                     self._做_函数调用节点(虚拟调用, 回调环境)
                 except Exception as e:
                     messagebox.showerror("按钮执行失败", f"未找到目标函数或执行失败：{e}")
-                    
+            
             父容器 = _取挂载容器(窗口)
             主题 = _取界面主题(窗口)
-            return _创建主题按钮(父容器, 主题, 文字, 点击动作, 锚点="w")
+            return _创建主题按钮(父容器, 主题, 文字, 点击动作, 锚点="w", 样式=样式)
         _加上按钮._易码需要环境 = True
 
         def _转整数(值, 默认值=0):
@@ -1471,14 +1553,15 @@ class 解释器:
                 整数值 = 下界
             return max(int(下界), 整数值)
 
-        def _加上卡片(窗口或容器, 标题=""):
+        def _加上卡片(窗口或容器, 标题="", 显示边框=1):
             父容器 = _取挂载容器(窗口或容器)
             主题 = _取界面主题(窗口或容器)
+            边框开 = bool(_转整数(显示边框, 1))
 
             卡片 = tk.Frame(
                 父容器,
                 bg=主题["内容背景"],
-                highlightthickness=1,
+                highlightthickness=1 if 边框开 else 0,
                 highlightbackground=主题["边框颜色"],
                 highlightcolor=主题["边框颜色"],
                 bd=0,
@@ -1498,7 +1581,8 @@ class 解释器:
                     anchor="w",
                     justify="left",
                 ).pack(fill=tk.X)
-                tk.Frame(卡片, bg=主题["边框颜色"], height=1).pack(fill=tk.X, padx=10)
+                if 边框开:
+                    tk.Frame(卡片, bg=主题["边框颜色"], height=1).pack(fill=tk.X, padx=10)
 
             内容框 = tk.Frame(卡片, bg=主题["内容背景"], padx=12, pady=10)
             内容框.pack(fill=tk.BOTH, expand=True)
@@ -1614,12 +1698,16 @@ class 解释器:
             宽值 = _转整数(宽, 0)
             高值 = _转整数(高, 0)
 
+            定位控件 = getattr(控件, "_易码定位控件", 控件)
+            if 定位控件 is None:
+                定位控件 = 控件
+
             try:
-                控件.pack_forget()
+                定位控件.pack_forget()
             except Exception:
                 pass
             try:
-                控件.grid_forget()
+                定位控件.grid_forget()
             except Exception:
                 pass
 
@@ -1628,10 +1716,28 @@ class 解释器:
                 参数["width"] = 宽值
             if 高值 > 0:
                 参数["height"] = 高值
-            控件.place(**参数)
+            定位控件.place(**参数)
 
             try:
-                顶层 = 控件.winfo_toplevel()
+                父容器 = getattr(定位控件, "master", None)
+                if 父容器 is not None and bool(getattr(父容器, "_易码绝对布局容器", False)):
+                    右边 = x值 + (宽值 if 宽值 > 0 else int(定位控件.winfo_reqwidth() or 0))
+                    下边 = y值 + (高值 if 高值 > 0 else int(定位控件.winfo_reqheight() or 0))
+                    目标宽 = max(int(getattr(父容器, "winfo_reqwidth")() or 0), 右边 + 24)
+                    目标高 = max(int(getattr(父容器, "winfo_reqheight")() or 0), 下边 + 24)
+                    try:
+                        当前宽 = int(getattr(父容器, "winfo_width")() or 0)
+                        当前高 = int(getattr(父容器, "winfo_height")() or 0)
+                        目标宽 = max(目标宽, 当前宽)
+                        目标高 = max(目标高, 当前高)
+                    except Exception:
+                        pass
+                    父容器.configure(width=目标宽, height=目标高)
+            except Exception:
+                pass
+
+            try:
+                顶层 = 定位控件.winfo_toplevel()
                 更新滚动 = getattr(顶层, "_易码更新滚动区域", None)
                 if callable(更新滚动):
                     更新滚动()
@@ -1815,6 +1921,8 @@ class 解释器:
             容器.grid_rowconfigure(0, weight=1)
             容器.grid_columnconfigure(0, weight=1)
 
+            # 绝对定位时移动外层容器，避免只移动 Treeview 导致显示异常。
+            表格._易码定位控件 = 容器
             表格._易码列名 = 列名
             表格._易码内容字体 = 内容字体
             表格._易码表头字体 = 表头字体
@@ -1873,6 +1981,7 @@ class 解释器:
         self.全局环境.记住("加复选框", _加上复选框)
         self.全局环境.记住("加单选按钮", _加上单选按钮)
         self.全局环境.记住("读输入", _读取输入)
+        self.全局环境.记住("写输入", _写入输入)
         self.全局环境.记住("改文字", _修改文字)
         self.全局环境.记住("加按钮", _加上按钮)
         self.全局环境.记住("加卡片", _加上卡片)
