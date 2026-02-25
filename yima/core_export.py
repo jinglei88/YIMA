@@ -3,11 +3,47 @@
 from __future__ import annotations
 
 import importlib.util
+import glob
 import os
 import time
 from typing import Any, Callable
 
 from .core_completion import extract_import_alias_map
+
+
+def _module_exists(module_name: str, module_exists_checker: Callable[[str], bool] | None = None) -> bool:
+    try:
+        if module_exists_checker is not None:
+            return bool(module_exists_checker(str(module_name or "").strip()))
+        return importlib.util.find_spec(str(module_name or "").strip()) is not None
+    except Exception:
+        return False
+
+
+RUNTIME_CORE_REQUIRED_FILES = (
+    "解释器.py",
+    "语法分析.py",
+    "词法分析.py",
+    "语法树.py",
+    "错误.py",
+    "信号.py",
+    "环境.py",
+)
+
+
+def _runtime_core_complete(runtime_core_dir: str) -> bool:
+    if not os.path.isdir(runtime_core_dir):
+        return False
+    for filename in RUNTIME_CORE_REQUIRED_FILES:
+        source_path = os.path.join(runtime_core_dir, filename)
+        if os.path.isfile(source_path):
+            continue
+        stem = os.path.splitext(filename)[0]
+        pyc_candidates = glob.glob(os.path.join(runtime_core_dir, "__pycache__", f"{stem}.cpython-*.pyc"))
+        if not pyc_candidates:
+            return False
+    return True
+
 
 def sanitize_export_name(name: str, default_name: str = "易码生成软件") -> str:
     cleaned = str(name or "").strip()
@@ -107,10 +143,14 @@ def export_preflight_check(
     tool_root = os.path.abspath(str(tool_root_dir or ""))
     packaging_tool_path = os.path.join(tool_root, "易码打包工具.py")
     runtime_core_dir = os.path.join(tool_root, "yima")
-    if not os.path.isfile(packaging_tool_path):
+    packaging_tool_ready = os.path.isfile(packaging_tool_path) or _module_exists("易码打包工具", python_module_exists)
+    runtime_core_ready = _runtime_core_complete(runtime_core_dir)
+    if not packaging_tool_ready:
         errors.append("缺少打包工具文件：易码打包工具.py")
-    if not os.path.isdir(runtime_core_dir):
-        errors.append("缺少运行时核心目录：yima")
+    if not runtime_core_ready:
+        errors.append(
+            "缺少完整运行时核心目录：yima（需包含解释器.py、语法分析.py、词法分析.py 等核心文件）"
+        )
 
     output_abs = os.path.abspath(os.path.expanduser(str(output_path or "").strip()))
     output_dir = os.path.dirname(output_abs) or workspace_dir

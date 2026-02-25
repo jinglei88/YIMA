@@ -16,7 +16,121 @@ import shutil
 import re
 import importlib.util
 import json
+import glob
 from collections import deque
+
+
+def _subprocess_no_window_kwargs():
+    """Best-effort suppression for transient Windows console windows."""
+    if os.name != "nt":
+        return {}
+    kwargs = {}
+    try:
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    except Exception:
+        pass
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+        startupinfo.wShowWindow = 0
+        kwargs["startupinfo"] = startupinfo
+    except Exception:
+        pass
+    return kwargs
+
+
+RUNTIME_CORE_REQUIRED_FILES = (
+    "解释器.py",
+    "语法分析.py",
+    "词法分析.py",
+    "语法树.py",
+    "错误.py",
+    "信号.py",
+    "环境.py",
+)
+
+
+def _validate_runtime_core_dir(runtime_core_dir):
+    if not os.path.isdir(runtime_core_dir):
+        raise FileNotFoundError(f"找不到易码核心库目录：{runtime_core_dir}")
+    missing = []
+    for name in RUNTIME_CORE_REQUIRED_FILES:
+        source_path = os.path.join(runtime_core_dir, name)
+        if os.path.isfile(source_path):
+            continue
+        stem = os.path.splitext(name)[0]
+        pyc_candidates = glob.glob(os.path.join(runtime_core_dir, "__pycache__", f"{stem}.cpython-*.pyc"))
+        if pyc_candidates:
+            continue
+        missing.append(name)
+    if missing:
+        raise FileNotFoundError(
+            "运行时核心文件缺失："
+            + "、".join(missing)
+            + f"\n目录：{runtime_core_dir}\n"
+            + "请使用包含完整 yima 运行时源码的编辑器发布包。"
+        )
+
+
+def _looks_like_python_executable(path):
+    name = os.path.basename(str(path or "").strip()).lower()
+    return name.startswith("python") or name in {"py", "py.exe"}
+
+
+def _resolve_python_launcher():
+    """Resolve a usable Python launcher for invoking pip/PyInstaller."""
+    candidates = []
+    env_python = str(os.environ.get("YIMA_PYTHON", "") or "").strip()
+    if env_python:
+        candidates.append([env_python])
+
+    interpreter_candidates = []
+    for exe in (sys.executable, getattr(sys, "_base_executable", "")):
+        path = str(exe or "").strip()
+        if not path:
+            continue
+        if not _looks_like_python_executable(path):
+            continue
+        interpreter_candidates.append([path])
+
+    shell_candidates = []
+    for cmd in ("python", "python3"):
+        if shutil.which(cmd):
+            shell_candidates.append([cmd])
+    if shutil.which("py"):
+        shell_candidates.append(["py", "-3"])
+
+    if getattr(sys, "frozen", False):
+        candidates.extend(shell_candidates)
+        candidates.extend(interpreter_candidates)
+    else:
+        candidates.extend(interpreter_candidates)
+        candidates.extend(shell_candidates)
+
+    tried = set()
+    for prefix in candidates:
+        key = tuple(prefix)
+        if key in tried:
+            continue
+        tried.add(key)
+        try:
+            probe = subprocess.run(
+                prefix + ["-c", "import sys; print(sys.version_info[0])"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=12,
+                **_subprocess_no_window_kwargs(),
+            )
+            if probe.returncode == 0 and str(probe.stdout or "").strip().startswith("3"):
+                return prefix
+        except Exception:
+            pass
+
+    raise RuntimeError(
+        "未找到可用 Python 3 解释器。\n"
+        "请先安装 Python 3，并确保命令行可执行 python（或设置环境变量 YIMA_PYTHON 指向 python.exe）。"
+    )
 
 def 显示帮助():
     print("===================================")
@@ -483,16 +597,30 @@ if __name__ == '__main__':
     进度打字机(f"[预检查] 打包根目录：{打包根目录}")
     进度打字机(f"[预检查] 依赖源码文件数：{len(本地依赖文件)}")
     进度打字机("[..] 正在检查打包装备 (PyInstaller)...")
+    python_launcher = _resolve_python_launcher()
     try:
-        import PyInstaller
-    except ImportError:
+        probe = subprocess.run(
+            python_launcher + ["-c", "import PyInstaller"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            **_subprocess_no_window_kwargs(),
+        )
+        has_pyinstaller = probe.returncode == 0
+    except Exception:
+        has_pyinstaller = False
+    if not has_pyinstaller:
         进度打字机("[提示] 没有找到 PyInstaller，正在为你自动安装...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"], check=True)
+        subprocess.run(
+            python_launcher + ["-m", "pip", "install", "pyinstaller"],
+            check=True,
+            **_subprocess_no_window_kwargs(),
+        )
         
     进度打字机("开始打包 EXE ...")
     yima核心库路径 = os.path.join(工具根目录, 'yima')
-    if not os.path.isdir(yima核心库路径):
-        raise FileNotFoundError(f"找不到易码核心库目录：{yima核心库路径}")
+    _validate_runtime_core_dir(yima核心库路径)
     分隔符 = ';' if os.name == 'nt' else ':'
     
     # 先确保当前执行源码本体被打进包里（运行入口）
@@ -540,10 +668,7 @@ if __name__ == '__main__':
     自动隐藏导入 = sorted(自动隐藏导入)
             
     控制台参数 = "--windowed" if 隐藏黑框 else "--console"
-    命令参数 = [
-        sys.executable, "-m", "PyInstaller",
-        "--noconfirm", "--onefile",
-    ]
+    命令参数 = list(python_launcher) + ["-m", "PyInstaller", "--noconfirm", "--onefile"]
     if 图标绝对路径:
         命令参数.append(f"--icon={图标绝对路径}")
     命令参数.append(控制台参数)
@@ -570,7 +695,8 @@ if __name__ == '__main__':
         stderr=subprocess.STDOUT,
         text=True,
         encoding=sys_encoding,
-        errors='replace'
+        errors='replace',
+        **_subprocess_no_window_kwargs(),
     )
     for line in iter(process.stdout.readline, ''):
         if line.strip():

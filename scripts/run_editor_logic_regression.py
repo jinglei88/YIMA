@@ -201,6 +201,35 @@ def check_core_export_preflight_rules() -> None:
         _assert_true(any("missing_mod" in str(x) and "无法解析的模块" in str(x) for x in errors), f"core export preflight: missing module check failed: {errors}")
         _assert_true(any("软件名称包含非法字符" in str(x) for x in warnings), f"core export preflight: sanitize warning missing: {warnings}")
         _assert_true(any("图标建议使用 .ico 格式" in str(x) for x in warnings), f"core export preflight: icon warning missing: {warnings}")
+
+        fallback_entry = workspace / "fallback.ym"
+        fallback_entry.write_text('引入 "json" 叫做 J\n显示 "ok"\n', encoding="utf-8")
+        fallback_tool_root = root / "frozen_tool_root"
+        fallback_tool_root.mkdir(parents=True, exist_ok=True)
+        fallback_runtime = fallback_tool_root / "yima"
+        fallback_runtime.mkdir(parents=True, exist_ok=True)
+        for runtime_name in ("解释器.py", "语法分析.py", "词法分析.py", "语法树.py", "错误.py", "信号.py", "环境.py"):
+            (fallback_runtime / runtime_name).write_text("# runtime\n", encoding="utf-8")
+        fallback_cfg = {
+            "软件名称": "发布包",
+            "图标路径": None,
+        }
+        fallback_output = str(workspace / "dist" / "发布包.exe")
+        fallback_errors, _ = export_preflight_check(
+            source_entry=str(fallback_entry),
+            package_config=fallback_cfg,
+            output_path=fallback_output,
+            workspace_dir=str(workspace),
+            tool_root_dir=str(fallback_tool_root),
+            sanitize_export_name_func=lambda name: str(name).replace(":", "_"),
+            builtin_module_names={"系统工具"},
+            module_locator=lambda _name: None,
+            python_module_exists=lambda name: str(name) in {"json", "易码打包工具"},
+        )
+        _assert_true(
+            not fallback_errors,
+            f"core export preflight: packaged-environment fallback should stay green: {fallback_errors}",
+        )
     print("[OK] core export preflight rules passed")
 
 

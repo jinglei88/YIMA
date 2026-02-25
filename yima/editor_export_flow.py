@@ -15,6 +15,8 @@ __marker_id__ = "YIMA-JINGLEI-CORE"
 
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import tkinter as tk
@@ -534,11 +536,33 @@ def start_export_packaging_task(
         + "============================="
     )
 
+    mode_title = str(package_config.get("模式标题") or "").strip()
+    hide_console = bool(package_config.get("隐藏黑框"))
+    if mode_title == "一键打包":
+        # Quick export should always be production-like: no console window.
+        hide_console = True
+    owner.print_output(
+        f"[配置] 运行模式：{'纯净窗口版（无黑窗）' if hide_console else '代码黑框版（调试）'}"
+    )
+
     def print_progress(text):
         line = str(text or "")
         if line.startswith("打包成功："):
             return
         owner.root.after(0, lambda t=line: owner.print_output(t))
+
+    def _open_output_folder(exe_path: str) -> None:
+        folder = os.path.dirname(os.path.abspath(exe_path))
+        if not folder:
+            return
+        try:
+            if os.name == "nt":
+                os.startfile(folder)  # type: ignore[attr-defined]
+                return
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.Popen([opener, folder])
+        except Exception as exc:
+            owner.print_output(f"[WARN] Packaging succeeded, but cannot open output folder: {folder} ({exc})")
 
     def run_packaging():
         original_dir = os.getcwd()
@@ -558,7 +582,7 @@ def start_export_packaging_task(
             final_path = 编译并打包(
                 package_entry,
                 package_config["图标路径"],
-                package_config["隐藏黑框"],
+                hide_console,
                 print_progress,
                 package_config["软件名称"],
                 source_dir or owner.workspace_dir,
@@ -575,6 +599,7 @@ def start_export_packaging_task(
 
             owner.root.after(0, lambda p=final_abs: owner.print_output(f"打包成功：{p}"))
             owner.root.after(0, lambda p=final_abs: messagebox.showinfo("打包完成", f"可执行文件已生成：\n{p}"))
+            owner.root.after(0, lambda p=final_abs: _open_output_folder(p))
         except Exception as e:
             owner.root.after(0, lambda msg=str(e): messagebox.showerror("打包失败", msg))
         finally:
