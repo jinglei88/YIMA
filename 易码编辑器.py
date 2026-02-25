@@ -975,32 +975,37 @@ class 易码IDE:
     def export_exe(self):
         return ui_export_exe(self)
 if __name__ == "__main__":
-    # 必须在初始化 Tk 之前宣告 DPI 感知，否则即使点数(pt)字体缩放了，Tkinter本身也会按照低分屏映射引发排版错乱
+    root = None
     try:
-        from ctypes import windll
-        windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
+        # 必须在初始化 Tk 之前宣告 DPI 感知，否则即使点数(pt)字体缩放了，Tkinter本身也会按照低分屏映射引发排版错乱
+        try:
+            from ctypes import windll
+            windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
 
-    root = tk.Tk()
+        root = tk.Tk()
 
-    app = 易码IDE(root)
-    # 不再需要外部强行插入欢迎代码，逻辑已在 init 默认建 tab
-    
-    # 窗口居中
-    root.update_idletasks()
-    w = root.winfo_screenwidth()
-    h = root.winfo_screenheight()
-    size = tuple(int(_) for _ in root.geometry().split('+')[0].split('x'))
-    x = w/2 - size[0]/2
-    y = h/2 - size[1]/2
-    root.geometry("%dx%d+%d+%d" % (size[0], size[1], x, y))
-    
-    try:
+        app = 易码IDE(root)
+        # 不再需要外部强行插入欢迎代码，逻辑已在 init 默认建 tab
+
+        # 窗口居中
+        root.update_idletasks()
+        w = root.winfo_screenwidth()
+        h = root.winfo_screenheight()
+        size = tuple(int(_) for _ in root.geometry().split('+')[0].split('x'))
+        x = w/2 - size[0]/2
+        y = h/2 - size[1]/2
+        root.geometry("%dx%d+%d+%d" % (size[0], size[1], x, y))
+
         root.mainloop()
     except KeyboardInterrupt:
         # 允许在终端用 Ctrl+C 结束，不打印 traceback。
-        try:
-            root.destroy()
-        except Exception:
-            pass
+        pass
+    finally:
+        if root is not None:
+            try:
+                if root.winfo_exists():
+                    root.destroy()
+            except Exception:
+                pass

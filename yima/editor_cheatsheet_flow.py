@@ -581,6 +581,16 @@ def _format_quick_pattern_label(item):
     return f"{scene} · {syntax}" if scene and syntax else (syntax or scene or "（空）")
 
 
+def _format_quick_pattern_preview(value, max_chars=96):
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text:
+        return "（无）"
+    if max_chars > 0 and len(text) > max_chars:
+        return text[: max_chars - 1].rstrip() + "…"
+    return text
+
+
 def _render_quick_patterns(owner, items):
     listbox = getattr(owner, "cheatsheet_quick_listbox", None)
     if listbox is None:
@@ -663,12 +673,16 @@ def _update_quick_pattern_detail(owner):
     if detail_var is None:
         return
     item = _selected_quick_pattern(owner)
-    if not item:
-        detail_var.set("推荐：-\n示例：-")
-        return
-    syntax = str(item.get("syntax", "") or "（无）").replace("\n", " ").replace("\r", " ").strip()
-    example = str(item.get("example", "") or "（无）").replace("\n", " ").replace("\r", " ").strip()
-    detail_var.set(f"推荐：{syntax}\n示例：{example}")
+    detail_text = "推荐：-\n示例：-"
+    if item:
+        syntax = _format_quick_pattern_preview(item.get("syntax", ""))
+        example = _format_quick_pattern_preview(item.get("example", ""))
+        detail_text = f"推荐：{syntax}\n示例：{example}"
+    try:
+        if detail_var.get() != detail_text:
+            detail_var.set(detail_text)
+    except tk.TclError:
+        pass
 
 
 def setup_cheatsheet_quick_section(owner, sidebar_frame, create_tool_btn):
