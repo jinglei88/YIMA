@@ -49,10 +49,11 @@ def choose_export_mode_dialog(owner) -> str | None:
     mode_window.grab_set()
     title_font = getattr(owner, "font_ui_bold", owner.font_ui)
 
-    result = {"value": None}
+    result_value: str | None = None
 
     def set_mode(value):
-        result["value"] = value
+        nonlocal result_value
+        result_value = value
         mode_window.destroy()
 
     main = tk.Frame(mode_window, bg=owner.theme_toolbar_bg, padx=16, pady=14)
@@ -108,7 +109,7 @@ def choose_export_mode_dialog(owner) -> str | None:
     mode_window.bind("<Return>", lambda _e: set_mode("quick"))
     _center_dialog(owner, mode_window, main, min_width=560, min_height=220)
     owner.root.wait_window(mode_window)
-    return result["value"]
+    return result_value
 
 
 def advanced_export_config_dialog(
@@ -133,7 +134,7 @@ def advanced_export_config_dialog(
     path_var = tk.StringVar(value=default_output_path)
     icon_var = tk.StringVar(value=default_icon_path)
     mode_var = tk.StringVar(value="windowed")
-    result = {"value": None}
+    result_value: dict[str, Any] | None = None
 
     main = tk.Frame(advanced_window, bg=owner.theme_toolbar_bg, padx=14, pady=12)
     main.pack(fill=tk.BOTH, expand=True)
@@ -234,6 +235,7 @@ def advanced_export_config_dialog(
         advanced_window.destroy()
 
     def confirm_dialog():
+        nonlocal result_value
         candidate = build_advanced_export_config_func(
             name_var.get(),
             path_var.get(),
@@ -248,7 +250,7 @@ def advanced_export_config_dialog(
             messagebox.showwarning("图标无效", "图标文件不存在，请重新选择。", parent=advanced_window)
             return
 
-        result["value"] = candidate
+        result_value = candidate
         advanced_window.destroy()
 
     tk.Button(main, text="浏览...", command=browse_output_path, font=owner.font_ui, width=10).grid(
@@ -278,7 +280,218 @@ def advanced_export_config_dialog(
 
     _center_dialog(owner, advanced_window, main, min_width=860, min_height=420)
     owner.root.wait_window(advanced_window)
-    return result["value"]
+    return result_value
+
+
+def export_config_pages_dialog(
+    owner,
+    default_values: dict[str, Any],
+    build_advanced_export_config_func: Callable[[str, str, str, str, str, str], dict[str, Any]],
+) -> dict[str, Any] | None:
+    default_app_name = str(default_values.get("软件名称", "") or "")
+    default_output_path = str(default_values.get("输出路径", "") or "")
+    default_icon_path = str(default_values.get("图标路径", "") or "")
+    default_output_dir = str(default_values.get("输出目录", "") or owner.workspace_dir)
+    default_file_name = str(default_values.get("默认软件文件名", f"{default_app_name}.exe") or f"{default_app_name}.exe")
+
+    window = tk.Toplevel(owner.root)
+    window.title("导出软件")
+    window.configure(bg=owner.theme_toolbar_bg)
+    window.resizable(False, False)
+    window.transient(owner.root)
+    window.grab_set()
+
+    mode_var = tk.StringVar(value="quick")
+    name_var = tk.StringVar(value=default_app_name)
+    path_var = tk.StringVar(value=default_output_path)
+    icon_var = tk.StringVar(value=default_icon_path)
+    run_mode_var = tk.StringVar(value="windowed")
+    result_value: dict[str, Any] | None = None
+
+    main = tk.Frame(window, bg=owner.theme_toolbar_bg, padx=14, pady=12)
+    main.pack(fill=tk.BOTH, expand=True)
+
+    tk.Label(
+        main,
+        text="导出软件",
+        bg=owner.theme_toolbar_bg,
+        fg=owner.theme_toolbar_fg,
+        font=getattr(owner, "font_ui_bold", owner.font_ui),
+        anchor="w",
+    ).pack(fill=tk.X)
+
+    switch_row = tk.Frame(main, bg=owner.theme_toolbar_bg)
+    switch_row.pack(fill=tk.X, pady=(8, 8))
+
+    pages_holder = tk.Frame(main, bg=owner.theme_toolbar_bg)
+    pages_holder.pack(fill=tk.BOTH, expand=True)
+    quick_page = tk.Frame(pages_holder, bg=owner.theme_toolbar_bg)
+    advanced_page = tk.Frame(pages_holder, bg=owner.theme_toolbar_bg)
+
+    def _switch_mode(target: str):
+        mode_var.set(target)
+        if target == "quick":
+            advanced_page.pack_forget()
+            quick_page.pack(fill=tk.BOTH, expand=True)
+            btn_quick.configure(bg="#0E639C", fg="#FFFFFF")
+            btn_adv.configure(bg=owner.theme_panel_bg, fg=owner.theme_toolbar_fg)
+        else:
+            quick_page.pack_forget()
+            advanced_page.pack(fill=tk.BOTH, expand=True)
+            btn_adv.configure(bg="#0E639C", fg="#FFFFFF")
+            btn_quick.configure(bg=owner.theme_panel_bg, fg=owner.theme_toolbar_fg)
+        _center_dialog(owner, window, main, min_width=920, min_height=500)
+
+    btn_quick = tk.Button(
+        switch_row,
+        text="快速打包",
+        command=lambda: _switch_mode("quick"),
+        font=owner.font_ui,
+        relief="flat",
+        borderwidth=0,
+        padx=10,
+        pady=4,
+        cursor="hand2",
+    )
+    btn_quick.pack(side=tk.LEFT)
+    btn_adv = tk.Button(
+        switch_row,
+        text="高级设置",
+        command=lambda: _switch_mode("advanced"),
+        font=owner.font_ui,
+        relief="flat",
+        borderwidth=0,
+        padx=10,
+        pady=4,
+        cursor="hand2",
+    )
+    btn_adv.pack(side=tk.LEFT, padx=(6, 0))
+
+    quick_box = tk.Frame(
+        quick_page,
+        bg=owner.theme_panel_bg,
+        highlightthickness=1,
+        highlightbackground=owner.theme_toolbar_border,
+        highlightcolor=owner.theme_toolbar_border,
+        bd=0,
+        padx=12,
+        pady=10,
+    )
+    quick_box.pack(fill=tk.BOTH, expand=True)
+    tk.Label(
+        quick_box,
+        text="一键打包（推荐）",
+        bg=owner.theme_panel_bg,
+        fg="#DDEBFF",
+        font=getattr(owner, "font_ui_bold", owner.font_ui),
+        anchor="w",
+    ).pack(fill=tk.X)
+    tk.Label(
+        quick_box,
+        text=f"软件名称：{default_app_name}\n输出路径：{default_output_path}\n图标：{default_icon_path or '默认 logo.ico（若存在）'}",
+        bg=owner.theme_panel_bg,
+        fg=owner.theme_toolbar_fg,
+        font=owner.font_ui,
+        justify="left",
+        anchor="w",
+        pady=8,
+    ).pack(fill=tk.X)
+
+    adv = advanced_page
+    label_style = {"bg": owner.theme_toolbar_bg, "fg": owner.theme_toolbar_fg, "font": owner.font_ui}
+    input_style = {"font": owner.font_ui, "bg": owner.theme_bg, "fg": owner.theme_fg, "insertbackground": owner.theme_fg}
+    tk.Label(adv, text="软件名称：", **label_style).grid(row=0, column=0, sticky="w", pady=(0, 6))
+    tk.Entry(adv, textvariable=name_var, width=48, **input_style).grid(row=0, column=1, columnspan=2, sticky="we", padx=(8, 0), pady=(0, 6))
+    tk.Label(adv, text="输出路径：", **label_style).grid(row=1, column=0, sticky="w", pady=6)
+    tk.Entry(adv, textvariable=path_var, width=48, **input_style).grid(row=1, column=1, sticky="we", padx=(8, 8), pady=6)
+    tk.Label(adv, text="图标文件：", **label_style).grid(row=2, column=0, sticky="w", pady=6)
+    tk.Entry(adv, textvariable=icon_var, width=48, **input_style).grid(row=2, column=1, sticky="we", padx=(8, 8), pady=6)
+
+    mode_frame = tk.Frame(adv, bg=owner.theme_toolbar_bg)
+    mode_frame.grid(row=3, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 2))
+    tk.Label(adv, text="运行模式：", **label_style).grid(row=3, column=0, sticky="nw", pady=(8, 2))
+    tk.Radiobutton(
+        mode_frame, text="代码黑框版（调试）", variable=run_mode_var, value="console",
+        bg=owner.theme_toolbar_bg, fg=owner.theme_toolbar_fg, selectcolor=owner.theme_panel_bg,
+        activebackground=owner.theme_toolbar_bg, activeforeground=owner.theme_toolbar_fg, font=owner.font_ui,
+    ).pack(anchor="w")
+    tk.Radiobutton(
+        mode_frame, text="纯净窗口版（发布）", variable=run_mode_var, value="windowed",
+        bg=owner.theme_toolbar_bg, fg=owner.theme_toolbar_fg, selectcolor=owner.theme_panel_bg,
+        activebackground=owner.theme_toolbar_bg, activeforeground=owner.theme_toolbar_fg, font=owner.font_ui,
+    ).pack(anchor="w")
+
+    def _browse_output_path():
+        selected = filedialog.asksaveasfilename(
+            title="选择导出 EXE 路径",
+            parent=window,
+            initialdir=owner.workspace_dir,
+            initialfile=f"{owner._sanitize_export_name(name_var.get())}.exe",
+            defaultextension=".exe",
+            filetypes=[("Windows 可执行文件", "*.exe"), ("所有文件", "*.*")],
+        )
+        if selected:
+            path_var.set(selected)
+
+    def _browse_icon():
+        selected = filedialog.askopenfilename(
+            title="选择图标文件（.ico）",
+            parent=window,
+            initialdir=owner.workspace_dir,
+            filetypes=[("图标文件", "*.ico"), ("所有文件", "*.*")],
+        )
+        if selected:
+            icon_var.set(selected)
+
+    tk.Button(adv, text="浏览...", command=_browse_output_path, font=owner.font_ui, width=10).grid(row=1, column=2, sticky="e", pady=6)
+    tk.Button(adv, text="浏览...", command=_browse_icon, font=owner.font_ui, width=10).grid(row=2, column=2, sticky="e", pady=6)
+    adv.grid_columnconfigure(1, weight=1)
+
+    action = tk.Frame(main, bg=owner.theme_toolbar_bg)
+    action.pack(fill=tk.X, pady=(10, 0))
+
+    def _cancel():
+        window.destroy()
+
+    def _confirm():
+        nonlocal result_value
+        if mode_var.get() == "quick":
+            result_value = core_build_quick_export_config(default_app_name, default_output_path, default_icon_path)
+            window.destroy()
+            return
+
+        candidate = build_advanced_export_config_func(
+            name_var.get(),
+            path_var.get(),
+            icon_var.get(),
+            run_mode_var.get(),
+            default_output_dir,
+            default_file_name,
+        )
+        icon_path = candidate.get("图标路径")
+        if icon_path and not os.path.isfile(icon_path):
+            messagebox.showwarning("图标无效", "图标文件不存在，请重新选择。", parent=window)
+            return
+        result_value = candidate
+        window.destroy()
+
+    tk.Button(action, text="取消", command=_cancel, font=owner.font_ui, width=10).pack(side=tk.RIGHT)
+    tk.Button(
+        action,
+        text="开始打包",
+        command=_confirm,
+        font=owner.font_ui,
+        width=12,
+        bg="#1E7BC8",
+        fg="#FFFFFF",
+    ).pack(side=tk.RIGHT, padx=(0, 8))
+
+    _switch_mode("quick")
+    window.bind("<Escape>", lambda _e: _cancel())
+    window.bind("<Return>", lambda _e: _confirm())
+    _center_dialog(owner, window, main, min_width=920, min_height=500)
+    owner.root.wait_window(window)
+    return result_value
 
 
 def export_precheck_and_confirm(
@@ -303,9 +516,6 @@ def export_precheck_and_confirm(
         if not messagebox.askyesno("确认覆盖", f"目标文件已存在：\n{output_path}\n\n是否覆盖？", parent=owner.root):
             return None
 
-    confirm_text = build_confirmation_text_func(package_config, source_entry, output_path)
-    if not messagebox.askyesno("确认导出", confirm_text, parent=owner.root):
-        return None
     return output_path
 
 
@@ -407,19 +617,8 @@ def export_exe(owner):
         raw_app_name=raw_app_name,
         tool_root_dir=owner.tool_root_dir,
     )
-    default_app_name = defaults["软件名称"]
-    default_output_path = defaults["输出路径"]
-    default_icon_path = defaults["图标路径"]
 
-    export_mode = choose_export_mode_dialog(owner)
-    if export_mode is None:
-        return
-
-    package_config = None
-    if export_mode == "quick":
-        package_config = core_build_quick_export_config(default_app_name, default_output_path, default_icon_path)
-    elif export_mode == "advanced":
-        package_config = advanced_export_config_dialog(owner, defaults, core_build_advanced_export_config)
+    package_config = export_config_pages_dialog(owner, defaults, core_build_advanced_export_config)
 
     if not package_config:
         return

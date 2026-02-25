@@ -70,13 +70,17 @@ from yima.editor_workspace_flow import (
 )
 from yima.editor_search_flow import (
     clear_find_marks as ui_clear_find_marks,
+    find_symbol_references as ui_find_symbol_references,
+    find_symbol_references_project as ui_find_symbol_references_project,
     find_next as ui_find_next,
     find_prev as ui_find_prev,
     focus_find_result as ui_focus_find_result,
+    goto_symbol_definition as ui_goto_symbol_definition,
     get_symbol_near_cursor as ui_get_symbol_near_cursor,
     highlight_find_matches as ui_highlight_find_matches,
     is_valid_symbol_name as ui_is_valid_symbol_name,
     open_find_dialog as ui_open_find_dialog,
+    rename_symbol_project as ui_rename_symbol_project,
     rename_symbol as ui_rename_symbol,
     replace_all as ui_replace_all,
     replace_one as ui_replace_one,
@@ -86,6 +90,7 @@ from yima.editor_shortcuts_flow import (
     bind_global_shortcuts as ui_bind_global_shortcuts,
     shortcut_cheatsheet as ui_shortcut_cheatsheet,
     shortcut_find as ui_shortcut_find,
+    shortcut_latest_restore_report as ui_shortcut_latest_restore_report,
     shortcut_multi_add_next as ui_shortcut_multi_add_next,
     shortcut_multi_select_all as ui_shortcut_multi_select_all,
     shortcut_new as ui_shortcut_new,
@@ -94,6 +99,14 @@ from yima.editor_shortcuts_flow import (
     shortcut_prev_tab as ui_shortcut_prev_tab,
     shortcut_quick_view as ui_shortcut_quick_view,
     shortcut_rename_symbol as ui_shortcut_rename_symbol,
+    shortcut_rename_symbol_project as ui_shortcut_rename_symbol_project,
+    shortcut_references as ui_shortcut_references,
+    shortcut_references_project as ui_shortcut_references_project,
+    shortcut_restore_report_history as ui_shortcut_restore_report_history,
+    shortcut_rename_backup_history as ui_shortcut_rename_backup_history,
+    shortcut_restore_latest_backup as ui_shortcut_restore_latest_backup,
+    shortcut_runtime_diagnostics as ui_shortcut_runtime_diagnostics,
+    shortcut_symbol_definition as ui_shortcut_symbol_definition,
     shortcut_replace as ui_shortcut_replace,
     shortcut_run as ui_shortcut_run,
     shortcut_save as ui_shortcut_save,
@@ -250,6 +263,15 @@ from yima.editor_cheatsheet_flow import (
 )
 from yima.editor_examples_flow import open_examples as ui_open_examples
 from yima.editor_ui_designer_flow import open_ui_designer as ui_open_ui_designer
+from yima.editor_runtime_guard import (
+    open_latest_restore_report as ui_open_latest_restore_report,
+    open_rename_backup_history as ui_open_rename_backup_history,
+    open_restore_report_dir as ui_open_restore_report_dir,
+    open_restore_report_history as ui_open_restore_report_history,
+    open_runtime_diagnostics as ui_open_runtime_diagnostics,
+    open_runtime_log as ui_open_runtime_log,
+    restore_latest_rename_backup as ui_restore_latest_rename_backup,
+)
 
 class 易码IDE:
     def __init__(self, root):
@@ -677,6 +699,33 @@ class 易码IDE:
     def _shortcut_rename_symbol(self, event=None):
         return ui_shortcut_rename_symbol(self, event=event)
 
+    def _shortcut_rename_symbol_project(self, event=None):
+        return ui_shortcut_rename_symbol_project(self, event=event)
+
+    def _shortcut_symbol_definition(self, event=None):
+        return ui_shortcut_symbol_definition(self, event=event)
+
+    def _shortcut_references(self, event=None):
+        return ui_shortcut_references(self, event=event)
+
+    def _shortcut_references_project(self, event=None):
+        return ui_shortcut_references_project(self, event=event)
+
+    def _shortcut_runtime_diagnostics(self, event=None):
+        return ui_shortcut_runtime_diagnostics(self, event=event)
+
+    def _shortcut_restore_latest_backup(self, event=None):
+        return ui_shortcut_restore_latest_backup(self, event=event)
+
+    def _shortcut_rename_backup_history(self, event=None):
+        return ui_shortcut_rename_backup_history(self, event=event)
+
+    def _shortcut_latest_restore_report(self, event=None):
+        return ui_shortcut_latest_restore_report(self, event=event)
+
+    def _shortcut_restore_report_history(self, event=None):
+        return ui_shortcut_restore_report_history(self, event=event)
+
     def _shortcut_quick_view(self, event=None):
         return ui_shortcut_quick_view(self, event=event)
 
@@ -703,6 +752,18 @@ class 易码IDE:
 
     def rename_symbol(self, event=None):
         return ui_rename_symbol(self, event=event)
+
+    def rename_symbol_project(self, event=None):
+        return ui_rename_symbol_project(self, event=event)
+
+    def goto_symbol_definition(self, event=None):
+        return ui_goto_symbol_definition(self, event=event)
+
+    def find_symbol_references(self, event=None):
+        return ui_find_symbol_references(self, event=event)
+
+    def find_symbol_references_project(self, event=None):
+        return ui_find_symbol_references_project(self, event=event)
 
     def _clear_find_marks(self, editor=None):
         return ui_clear_find_marks(self, editor=editor)
@@ -880,6 +941,27 @@ class 易码IDE:
 
     def open_ui_designer(self, event=None):
         return ui_open_ui_designer(self, event=event)
+
+    def open_runtime_log(self, event=None):
+        return ui_open_runtime_log(self, event=event)
+
+    def open_runtime_diagnostics(self, event=None):
+        return ui_open_runtime_diagnostics(self, event=event)
+
+    def restore_latest_rename_backup(self, event=None):
+        return ui_restore_latest_rename_backup(self, event=event)
+
+    def open_rename_backup_history(self, event=None):
+        return ui_open_rename_backup_history(self, event=event)
+
+    def open_latest_restore_report(self, event=None):
+        return ui_open_latest_restore_report(self, event=event)
+
+    def open_restore_report_history(self, event=None):
+        return ui_open_restore_report_history(self, event=event)
+
+    def open_restore_report_dir(self, event=None):
+        return ui_open_restore_report_dir(self, event=event)
 
     def _refresh_cheatsheet(self, event=None):
         return ui_refresh_cheatsheet(self, event=event)

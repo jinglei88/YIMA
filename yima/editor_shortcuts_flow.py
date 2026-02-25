@@ -30,6 +30,22 @@ def bind_global_shortcuts(owner):
     owner.root.bind("<Control-h>", owner._shortcut_replace)
     owner.root.bind("<Control-Shift-R>", owner._shortcut_rename_symbol)
     owner.root.bind("<Control-Shift-r>", owner._shortcut_rename_symbol)
+    owner.root.bind("<Control-Alt-R>", owner._shortcut_rename_symbol_project)
+    owner.root.bind("<Control-Alt-r>", owner._shortcut_rename_symbol_project)
+    owner.root.bind("<Control-b>", owner._shortcut_symbol_definition)
+    owner.root.bind("<Control-B>", owner._shortcut_symbol_definition)
+    owner.root.bind("<Shift-F12>", owner._shortcut_references)
+    owner.root.bind("<Control-Shift-F12>", owner._shortcut_references_project)
+    owner.root.bind("<Control-Shift-D>", owner._shortcut_runtime_diagnostics)
+    owner.root.bind("<Control-Shift-d>", owner._shortcut_runtime_diagnostics)
+    owner.root.bind("<Control-Alt-B>", owner._shortcut_restore_latest_backup)
+    owner.root.bind("<Control-Alt-b>", owner._shortcut_restore_latest_backup)
+    owner.root.bind("<Control-Alt-H>", owner._shortcut_rename_backup_history)
+    owner.root.bind("<Control-Alt-h>", owner._shortcut_rename_backup_history)
+    owner.root.bind("<Control-Alt-J>", owner._shortcut_latest_restore_report)
+    owner.root.bind("<Control-Alt-j>", owner._shortcut_latest_restore_report)
+    owner.root.bind("<Control-Alt-K>", owner._shortcut_restore_report_history)
+    owner.root.bind("<Control-Alt-k>", owner._shortcut_restore_report_history)
     owner.root.bind("<Control-Shift-Q>", owner._shortcut_quick_view)
     owner.root.bind("<Control-Shift-q>", owner._shortcut_quick_view)
     owner.root.bind("<Control-Tab>", owner._shortcut_next_tab)
@@ -83,6 +99,42 @@ def shortcut_replace(owner, event=None):
 
 def shortcut_rename_symbol(owner, event=None):
     return owner.rename_symbol(event)
+
+
+def shortcut_rename_symbol_project(owner, event=None):
+    return owner.rename_symbol_project(event)
+
+
+def shortcut_symbol_definition(owner, event=None):
+    return owner.goto_symbol_definition(event)
+
+
+def shortcut_references(owner, event=None):
+    return owner.find_symbol_references(event)
+
+
+def shortcut_references_project(owner, event=None):
+    return owner.find_symbol_references_project(event)
+
+
+def shortcut_runtime_diagnostics(owner, event=None):
+    return owner.open_runtime_diagnostics(event)
+
+
+def shortcut_restore_latest_backup(owner, event=None):
+    return owner.restore_latest_rename_backup(event)
+
+
+def shortcut_rename_backup_history(owner, event=None):
+    return owner.open_rename_backup_history(event)
+
+
+def shortcut_latest_restore_report(owner, event=None):
+    return owner.open_latest_restore_report(event)
+
+
+def shortcut_restore_report_history(owner, event=None):
+    return owner.open_restore_report_history(event)
 
 
 def shortcut_quick_view(owner, event=None):

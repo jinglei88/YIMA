@@ -19,6 +19,8 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext, simpledialog
 from tkinter import font as tkfont
 
+from yima.editor_runtime_guard import log_owner_event, mark_clean_exit
+
 
 def _infer_tab_span(owner, index, probe_y):
     """通过坐标扫描推断标签左右边界（规避某些环境下 bbox 恒为 0 的问题）。"""
@@ -153,6 +155,12 @@ def on_app_close(owner):
             return
     current_file = owner._current_open_file()
     owner._remember_project(owner.workspace_dir, current_file)
+    try:
+        owner._save_project_state()
+    except Exception as e:
+        log_owner_event(owner, "warning", f"保存项目状态失败（退出阶段）：{e}")
+    log_owner_event(owner, "info", "用户关闭编辑器窗口。")
+    mark_clean_exit(owner)
     owner.root.destroy()
 
 

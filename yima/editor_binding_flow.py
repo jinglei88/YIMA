@@ -140,10 +140,11 @@ def build_toolbar_icon(owner, kind="run", size=16, color="#FFFFFF"):
         return img
 
     if kind == "run":
-        left = int(size * 0.16)
-        right = int(size * 0.90)
-        top = int(size * 0.10)
-        bottom = int(size * 0.90)
+        # 播放图标做得更内收，避免过尖、过大
+        left = int(size * 0.28)
+        right = int(size * 0.82)
+        top = int(size * 0.20)
+        bottom = int(size * 0.80)
         mid = (top + bottom) // 2
         half = max(1, (bottom - top) // 2)
         for y in range(top, bottom + 1):

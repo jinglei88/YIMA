@@ -144,7 +144,8 @@ class 解释器:
             "网络请求": ["发起请求", "发GET", "发POST", "发GET_JSON", "发POST_JSON", "读响应JSON"],
             "本地数据库": ["打开数据库", "执行SQL", "查询SQL", "关闭数据库", "开始事务", "提交事务", "回滚事务"],
             "图形界面": [
-                "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "加卡片", "加双列", "加登录模板", "加列表模板",
+                "建窗口", "加文字", "加输入框", "加多行文本框", "加组合框", "加复选框", "加单选按钮",
+                "读输入", "改文字", "加按钮", "加卡片", "加双列", "加登录模板", "加列表模板",
                 "设位置", "弹窗", "弹窗输入", "打开界面",
                 "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
             ],
@@ -1038,7 +1039,8 @@ class 解释器:
         from .错误 import 运行报错
 
         图形能力名 = [
-            "建窗口", "加文字", "加输入框", "读输入", "改文字", "加按钮", "加卡片", "加双列", "加登录模板", "加列表模板",
+            "建窗口", "加文字", "加输入框", "加多行文本框", "加组合框", "加复选框", "加单选按钮",
+            "读输入", "改文字", "加按钮", "加卡片", "加双列", "加登录模板", "加列表模板",
             "设位置", "弹窗", "弹窗输入", "打开界面",
             "加表格", "表格加行", "表格清空", "表格所有行", "表格选中行", "表格选中序号", "表格删行", "表格改行",
         ]
@@ -1257,9 +1259,163 @@ class 解释器:
             )
             输入框.pack(fill=tk.X, pady=(2, 10), ipady=6)
             return 输入框
+
+        def _加上多行文本框(窗口, 默认内容="", 行数=5):
+            父容器 = _取挂载容器(窗口)
+            主题 = _取界面主题(窗口)
+            行数值 = max(3, _转整数(行数, 5))
+            文本框 = tk.Text(
+                父容器,
+                height=行数值,
+                wrap="word",
+                font=("Microsoft YaHei", 11),
+                bg=主题["输入背景"],
+                fg=主题["输入文字"],
+                insertbackground=主题["输入文字"],
+                relief="flat",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=主题["边框颜色"],
+                highlightcolor=主题["强调色"],
+                padx=8,
+                pady=6,
+            )
+            默认文本 = str(默认内容 or "")
+            if 默认文本:
+                try:
+                    文本框.insert("1.0", 默认文本)
+                except Exception:
+                    pass
+            文本框.pack(fill=tk.X, pady=(2, 10))
+            return 文本框
+
+        def _加上组合框(窗口, 选项定义="", 默认值=""):
+            父容器 = _取挂载容器(窗口)
+            候选项 = _规范列名(选项定义)
+            组合框 = ttk.Combobox(
+                父容器,
+                values=候选项,
+                state="readonly",
+                font=("Microsoft YaHei", 11),
+            )
+            默认文本 = str(默认值 or "").strip()
+            if 默认文本 and 默认文本 in 候选项:
+                组合框.set(默认文本)
+            elif 候选项:
+                组合框.set(str(候选项[0]))
+            组合框.pack(fill=tk.X, pady=(2, 10), ipady=3)
+            return 组合框
+
+        def _触发界面函数调用(函数名, 回调环境, 错误标题):
+            目标函数名 = str(函数名 or "").strip()
+            if not 目标函数名:
+                return
+            try:
+                from .语法树 import 函数调用节点
+                虚拟调用 = 函数调用节点(目标函数名, [], 行号=0)
+                self._做_函数调用节点(虚拟调用, 回调环境)
+            except Exception as e:
+                messagebox.showerror(str(错误标题 or "组件执行失败"), f"未找到目标函数或执行失败：{e}")
+
+        def _加上复选框(窗口, 文字="勾选项", 绑定的函数名="", _易码环境=None):
+            回调环境 = _易码环境 if _易码环境 is not None else self.全局环境
+            父容器 = _取挂载容器(窗口)
+            主题 = _取界面主题(窗口)
+            勾选变量 = tk.IntVar(value=0)
+
+            def 切换动作():
+                _触发界面函数调用(绑定的函数名, 回调环境, "复选框执行失败")
+
+            复选框 = tk.Checkbutton(
+                父容器,
+                text=str(文字 or "勾选项"),
+                variable=勾选变量,
+                onvalue=1,
+                offvalue=0,
+                font=("Microsoft YaHei", 11),
+                bg=主题["内容背景"],
+                fg=主题["文字颜色"],
+                selectcolor=主题["输入背景"],
+                activebackground=主题["内容背景"],
+                activeforeground=主题["文字颜色"],
+                anchor="w",
+                relief="flat",
+                highlightthickness=0,
+                padx=2,
+                pady=2,
+                command=切换动作,
+            )
+            复选框._易码值变量 = 勾选变量
+            复选框._易码控件类型 = "复选框"
+            复选框.pack(fill=tk.X, pady=(2, 8))
+            return 复选框
+        _加上复选框._易码需要环境 = True
+
+        def _加上单选按钮(窗口, 文字="单选项", 绑定的函数名="", 组名="默认单选组", 值="", _易码环境=None):
+            回调环境 = _易码环境 if _易码环境 is not None else self.全局环境
+            父容器 = _取挂载容器(窗口)
+            主题 = _取界面主题(窗口)
+
+            根容器 = 父容器.winfo_toplevel()
+            if not hasattr(根容器, "_易码单选组变量") or not isinstance(getattr(根容器, "_易码单选组变量"), dict):
+                根容器._易码单选组变量 = {}
+            组字典 = 根容器._易码单选组变量
+            组键 = str(组名 or "默认单选组").strip() or "默认单选组"
+            单选变量 = 组字典.get(组键)
+            if 单选变量 is None:
+                单选变量 = tk.StringVar(value="")
+                组字典[组键] = 单选变量
+            单选值 = str(值 if str(值 or "").strip() else (文字 or "单选项"))
+
+            def 切换动作():
+                _触发界面函数调用(绑定的函数名, 回调环境, "单选按钮执行失败")
+
+            单选按钮 = tk.Radiobutton(
+                父容器,
+                text=str(文字 or "单选项"),
+                variable=单选变量,
+                value=单选值,
+                font=("Microsoft YaHei", 11),
+                bg=主题["内容背景"],
+                fg=主题["文字颜色"],
+                selectcolor=主题["输入背景"],
+                activebackground=主题["内容背景"],
+                activeforeground=主题["文字颜色"],
+                anchor="w",
+                relief="flat",
+                highlightthickness=0,
+                padx=2,
+                pady=2,
+                command=切换动作,
+            )
+            单选按钮._易码值变量 = 单选变量
+            单选按钮._易码单选值 = 单选值
+            单选按钮._易码控件类型 = "单选按钮"
+            单选按钮.pack(fill=tk.X, pady=(2, 8))
+            return 单选按钮
+        _加上单选按钮._易码需要环境 = True
             
         def _读取输入(输入框):
-            return 输入框.get()
+            if 输入框 is None:
+                return ""
+            值变量 = getattr(输入框, "_易码值变量", None)
+            if 值变量 is not None:
+                try:
+                    值 = 值变量.get()
+                    if str(getattr(输入框, "_易码控件类型", "")) == "复选框":
+                        return bool(_转整数(值, 0))
+                    return 值
+                except Exception:
+                    pass
+            if isinstance(输入框, tk.Text):
+                try:
+                    return 输入框.get("1.0", "end-1c")
+                except Exception:
+                    return ""
+            try:
+                return 输入框.get()
+            except Exception:
+                return ""
             
         def _修改文字(标签, 新内容):
             标签.config(text=新内容)
@@ -1712,6 +1868,10 @@ class 解释器:
         self.全局环境.记住("建窗口", _创建窗口)
         self.全局环境.记住("加文字", _加上文字)
         self.全局环境.记住("加输入框", _加上输入框)
+        self.全局环境.记住("加多行文本框", _加上多行文本框)
+        self.全局环境.记住("加组合框", _加上组合框)
+        self.全局环境.记住("加复选框", _加上复选框)
+        self.全局环境.记住("加单选按钮", _加上单选按钮)
         self.全局环境.记住("读输入", _读取输入)
         self.全局环境.记住("改文字", _修改文字)
         self.全局环境.记住("加按钮", _加上按钮)

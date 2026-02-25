@@ -758,25 +758,6 @@ def setup_cheatsheet_quick_section(owner, sidebar_frame, create_tool_btn):
         font=("Microsoft YaHei", 8),
     ).pack(side=tk.LEFT, padx=(4, 0))
 
-    template_row = tk.Frame(body, bg=owner.theme_panel_bg)
-    template_row.pack(fill=tk.X, pady=(4, 0))
-    create_tool_btn(
-        template_row,
-        "登录模板",
-        lambda: insert_ui_template(owner, "登录模板"),
-        variant="subtle",
-        compact=True,
-        font=("Microsoft YaHei", 8),
-    ).pack(side=tk.LEFT)
-    create_tool_btn(
-        template_row,
-        "列表模板",
-        lambda: insert_ui_template(owner, "列表模板"),
-        variant="subtle",
-        compact=True,
-        font=("Microsoft YaHei", 8),
-    ).pack(side=tk.LEFT, padx=(4, 0))
-
     owner.cheatsheet_quick_detail_var = tk.StringVar(value="推荐：-\n示例：-")
     detail_box = tk.Frame(
         body,

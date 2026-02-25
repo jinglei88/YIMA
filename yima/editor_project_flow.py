@@ -15,8 +15,11 @@ __marker_id__ = "YIMA-JINGLEI-CORE"
 
 import json
 import os
+import re
 import tkinter as tk
 from tkinter import filedialog, messagebox
+
+from yima.editor_runtime_guard import log_owner_event
 
 
 def open_file(owner):
@@ -173,6 +176,105 @@ def normalize_file_path(owner, path):
     except Exception:
         return None
     return normalized if os.path.isfile(normalized) else None
+
+
+def normalize_ui_designer_backend(owner, value):
+    del owner
+    text = str(value or "").strip().lower()
+    if text in {"json", "json文件", "json file", "json-file"}:
+        return "json"
+    return "sqlite"
+
+
+def _ui_backend_label(backend):
+    return "JSON文件" if str(backend) == "json" else "SQLite"
+
+
+def normalize_ui_designer_export_prefix(owner, value):
+    del owner
+    text = str(value or "").strip()
+    text = re.sub(r"[\\/:*?\"<>|]+", "_", text)
+    text = re.sub(r"\s+", "_", text)
+    text = text.strip("._")
+    return text[:60] if text else "界面设计"
+
+
+def _sanitize_ui_backend_map(owner, raw_map, max_count=120):
+    cleaned = {}
+    if not isinstance(raw_map, dict):
+        return cleaned
+    limit = max(1, int(max_count or 120))
+    for project_path, backend in raw_map.items():
+        normalized_project = normalize_project_dir(owner, project_path)
+        if not normalized_project or normalized_project in cleaned:
+            continue
+        cleaned[normalized_project] = normalize_ui_designer_backend(owner, backend)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _sanitize_ui_export_prefix_map(owner, raw_map, max_count=120):
+    cleaned = {}
+    if not isinstance(raw_map, dict):
+        return cleaned
+    limit = max(1, int(max_count or 120))
+    for project_path, prefix in raw_map.items():
+        normalized_project = normalize_project_dir(owner, project_path)
+        if not normalized_project or normalized_project in cleaned:
+            continue
+        cleaned[normalized_project] = normalize_ui_designer_export_prefix(owner, prefix)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _resolve_project_ui_backend(owner, project_dir):
+    backend_map = getattr(owner, "_ui_designer_data_backend_by_project", None)
+    normalized_project = normalize_project_dir(owner, project_dir)
+    if normalized_project and isinstance(backend_map, dict):
+        mapped = backend_map.get(normalized_project)
+        if mapped:
+            return normalize_ui_designer_backend(owner, mapped)
+    return normalize_ui_designer_backend(owner, getattr(owner, "_ui_designer_data_backend", "sqlite"))
+
+
+def _resolve_project_ui_export_prefix(owner, project_dir):
+    prefix_map = getattr(owner, "_ui_designer_layer_export_prefix_by_project", None)
+    normalized_project = normalize_project_dir(owner, project_dir)
+    if normalized_project and isinstance(prefix_map, dict):
+        mapped = prefix_map.get(normalized_project)
+        if mapped:
+            return normalize_ui_designer_export_prefix(owner, mapped)
+    return normalize_ui_designer_export_prefix(owner, getattr(owner, "_ui_designer_layer_export_prefix", "界面设计"))
+
+
+def _apply_project_ui_backend(owner, project_dir):
+    normalized_project = normalize_project_dir(owner, project_dir)
+    backend = _resolve_project_ui_backend(owner, normalized_project)
+    owner._ui_designer_data_backend = backend
+    if normalized_project and isinstance(getattr(owner, "_ui_designer_data_backend_by_project", None), dict):
+        owner._ui_designer_data_backend_by_project[normalized_project] = backend
+    export_prefix = _resolve_project_ui_export_prefix(owner, normalized_project)
+    owner._ui_designer_layer_export_prefix = export_prefix
+    if normalized_project and isinstance(getattr(owner, "_ui_designer_layer_export_prefix_by_project", None), dict):
+        owner._ui_designer_layer_export_prefix_by_project[normalized_project] = export_prefix
+
+    vars_list = getattr(owner, "_ui_designer_backend_vars", None)
+    if isinstance(vars_list, list):
+        label = _ui_backend_label(backend)
+        keep_vars = []
+        for var in vars_list:
+            if var is None:
+                continue
+            try:
+                if str(var.get()) != label:
+                    var.set(label)
+                keep_vars.append(var)
+            except Exception:
+                continue
+        owner._ui_designer_backend_vars = keep_vars
+    return backend
 
 
 def normalize_cursor_index(owner, index_text):
@@ -629,6 +731,13 @@ def load_project_state(owner):
     owner.last_session_views = {}
     owner.last_session_folds = {}
     owner.last_session_outline_focus = {}
+    owner._ui_designer_data_backend = normalize_ui_designer_backend(owner, getattr(owner, "_ui_designer_data_backend", "sqlite"))
+    owner._ui_designer_data_backend_by_project = {}
+    owner._ui_designer_layer_export_prefix = normalize_ui_designer_export_prefix(
+        owner,
+        getattr(owner, "_ui_designer_layer_export_prefix", "界面设计"),
+    )
+    owner._ui_designer_layer_export_prefix_by_project = {}
     try:
         if not os.path.exists(owner._state_file):
             return
@@ -661,6 +770,23 @@ def load_project_state(owner):
         owner.last_session_views = _build_normalized_view_map(owner, state.get("open_file_views", {}), max_count=20)
         owner.last_session_folds = _build_normalized_fold_map(owner, state.get("open_file_folds", {}), max_count=20, max_lines_per_file=200)
         owner.last_session_outline_focus = _build_normalized_outline_focus_map(owner, state.get("open_file_outline_focus", {}), max_count=20)
+        owner._ui_designer_data_backend = normalize_ui_designer_backend(owner, state.get("ui_designer_data_backend", owner._ui_designer_data_backend))
+        owner._ui_designer_data_backend_by_project = _sanitize_ui_backend_map(
+            owner,
+            state.get("ui_designer_data_backend_by_project", {}),
+            max_count=120,
+        )
+        owner._ui_designer_layer_export_prefix = normalize_ui_designer_export_prefix(
+            owner,
+            state.get("ui_designer_layer_export_prefix", owner._ui_designer_layer_export_prefix),
+        )
+        owner._ui_designer_layer_export_prefix_by_project = _sanitize_ui_export_prefix_map(
+            owner,
+            state.get("ui_designer_layer_export_prefix_by_project", {}),
+            max_count=120,
+        )
+        if owner.last_project_dir:
+            _apply_project_ui_backend(owner, owner.last_project_dir)
 
         active_file = normalize_file_path(owner, state.get("active_file"))
         if active_file:
@@ -673,7 +799,7 @@ def load_project_state(owner):
         if hasattr(replace_var, "set"):
             replace_var.set(normalize_state_text(owner, state.get("replace_query", ""), max_len=300))
     except Exception as e:
-        print(f"?? ?????????????{e}")
+        log_owner_event(owner, "warning", f"读取项目状态失败：{e}")
 
 def save_project_state(owner):
     try:
@@ -693,6 +819,34 @@ def save_project_state(owner):
         replace_var = getattr(owner, "replace_var", None)
         find_query = normalize_state_text(owner, find_var.get() if hasattr(find_var, "get") else "", max_len=300)
         replace_query = normalize_state_text(owner, replace_var.get() if hasattr(replace_var, "get") else "", max_len=300)
+        backend_map = _sanitize_ui_backend_map(
+            owner,
+            getattr(owner, "_ui_designer_data_backend_by_project", {}),
+            max_count=120,
+        )
+        current_backend = normalize_ui_designer_backend(owner, getattr(owner, "_ui_designer_data_backend", "sqlite"))
+        owner._ui_designer_data_backend = current_backend
+        prefix_map = _sanitize_ui_export_prefix_map(
+            owner,
+            getattr(owner, "_ui_designer_layer_export_prefix_by_project", {}),
+            max_count=120,
+        )
+        current_prefix = normalize_ui_designer_export_prefix(
+            owner,
+            getattr(owner, "_ui_designer_layer_export_prefix", "界面设计"),
+        )
+        owner._ui_designer_layer_export_prefix = current_prefix
+        current_project = normalize_project_dir(owner, owner.workspace_dir)
+        if current_project:
+            backend_map[current_project] = current_backend
+            prefix_map[current_project] = current_prefix
+        if owner.last_project_dir:
+            normalized_last = normalize_project_dir(owner, owner.last_project_dir)
+            if normalized_last:
+                backend_map[normalized_last] = current_backend
+                prefix_map[normalized_last] = current_prefix
+        owner._ui_designer_data_backend_by_project = backend_map
+        owner._ui_designer_layer_export_prefix_by_project = prefix_map
         state = {
             "last_project": owner.last_project_dir if owner.last_project_dir else "",
             "last_open_file": owner.last_open_file if owner.last_open_file else "",
@@ -704,17 +858,22 @@ def save_project_state(owner):
             "active_file": active_file if active_file else "",
             "find_query": find_query,
             "replace_query": replace_query,
+            "ui_designer_data_backend": current_backend,
+            "ui_designer_data_backend_by_project": backend_map,
+            "ui_designer_layer_export_prefix": current_prefix,
+            "ui_designer_layer_export_prefix_by_project": prefix_map,
         }
         with open(owner._state_file, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"?? ?????????????{e}")
+        log_owner_event(owner, "warning", f"保存项目状态失败：{e}")
 
 def remember_project(owner, dir_path, active_file=None):
     normalized = normalize_project_dir(owner, dir_path)
     if not normalized:
         return
     owner.last_project_dir = normalized
+    _apply_project_ui_backend(owner, normalized)
     if normalized in owner.recent_projects:
         owner.recent_projects.remove(normalized)
     owner.recent_projects.insert(0, normalized)
@@ -790,6 +949,7 @@ def switch_project(owner, dir_path, preferred_file=None, create_blank_if_empty=T
         return False
 
     owner.workspace_dir = project_dir
+    _apply_project_ui_backend(owner, project_dir)
     owner.refresh_file_tree()
     owner._close_all_tabs_silently()
 
@@ -889,7 +1049,8 @@ def restore_project_open_tabs(
         except Exception as e:
             printer = getattr(owner, "print_output", None)
             if callable(printer):
-                printer(f"?? ?????????{normalized}?{e}?")
+                printer(f"⚠️ 恢复标签页失败：{normalized}，原因：{e}")
+            log_owner_event(owner, "warning", f"恢复标签页失败：{normalized}，原因：{e}")
 
     if preferred_abs:
         preferred_tab_id = _find_tab_id_by_filepath(owner, preferred_abs)

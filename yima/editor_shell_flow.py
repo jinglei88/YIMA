@@ -18,6 +18,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
+from yima.editor_runtime_guard import announce_last_recovery, setup_runtime_guard
+
 
 def initialize_editor(owner, root):
     self = owner
@@ -44,6 +46,11 @@ def initialize_editor(owner, root):
     self.last_session_outline_focus = {}
     self._state_dir = os.path.join(os.path.expanduser("~"), ".yima_ide")
     self._state_file = os.path.join(self._state_dir, "editor_state.json")
+    self._logger = None
+    self._log_file = ""
+    self._recovery_dir = ""
+    self._recovery_info_file = ""
+    setup_runtime_guard(self)
     self._highlight_after_id = None
     self._diagnose_after_id = None
     self._outline_after_id = None
@@ -260,6 +267,7 @@ def initialize_editor(owner, root):
     self.setup_ui()
     self.bind_global_shortcuts()
     self.root.protocol("WM_DELETE_WINDOW", self.on_app_close)
+    announce_last_recovery(self)
 
 
 
